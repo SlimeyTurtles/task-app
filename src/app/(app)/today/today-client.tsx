@@ -16,10 +16,12 @@ import {
 import { DayGrid } from "@/components/calendar/day-grid";
 import { InboxPanel } from "@/components/calendar/inbox-panel";
 import { EventFormDialog, type EventDialogState } from "@/components/calendar/event-form-dialog";
+import { PlanAheadDialog } from "@/components/calendar/plan-ahead-dialog";
 
 export function TodayClient() {
   const [day, setDay] = useState(() => startOfLocalDay(new Date()));
   const [dialog, setDialog] = useState<EventDialogState>({ open: false });
+  const [planOpen, setPlanOpen] = useState(false);
 
   const dayStart = useMemo(() => startOfLocalDay(day), [day]);
   const dayEnd = useMemo(() => endOfLocalDay(day), [day]);
@@ -66,11 +68,14 @@ export function TodayClient() {
           <Badge variant="secondary">⚡ {totals.stress.toFixed(0)} stress</Badge>
           <Badge variant="secondary">🪫 {totals.exhaustion.toFixed(0)} exhaustion</Badge>
           <Badge variant="secondary">⏱ {Math.round(totals.minutes)}m logged</Badge>
+          <Button variant="outline" onClick={() => setPlanOpen(true)} title="Suggest a plan for the next 14 days">
+            <Sparkles className="size-4" /> Plan ahead
+          </Button>
           <Button onClick={() => openNew(setDialog, day, false)}>
             <Plus className="size-4" /> Log event
           </Button>
           <Button variant="outline" onClick={() => openNew(setDialog, day, true)} title="Log a wide-window low-confidence event">
-            <Sparkles className="size-4" /> Lazy log
+            Lazy log
           </Button>
         </div>
       </div>
@@ -89,6 +94,7 @@ export function TodayClient() {
       </div>
 
       <EventFormDialog state={dialog} onClose={() => setDialog({ open: false })} />
+      <PlanAheadDialog open={planOpen} onOpenChange={setPlanOpen} />
     </>
   );
 }

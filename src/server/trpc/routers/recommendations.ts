@@ -1,4 +1,4 @@
-import { TaskStatus, EventKind } from "@prisma/client";
+import { TaskStatus, EventKind, CalibrationDimension } from "@prisma/client";
 import { z } from "zod";
 
 import { protectedProcedure, router } from "../init";
@@ -9,9 +9,9 @@ import {
   type RecommendationTask,
   type RecoveryRule,
   type ScheduledLoad,
-  type Suggestion,
 } from "@/lib/recommendation";
 import { addDays, startOfLocalDay, endOfLocalDay } from "@/lib/scheduling";
+import { resolveMultiplier, type CalibrationRow } from "@/lib/calibration";
 
 const SUGGEST_HORIZON_DEFAULT = 14;
 
@@ -31,7 +31,7 @@ export const recommendationsRouter = router({
       const now = startOfLocalDay(new Date());
       const rangeEnd = endOfLocalDay(addDays(now, horizonDays - 1));
 
-      const [capacityRow, tasks, deps, events] = await Promise.all([
+      const [capacityRow, tasks, deps, events, calibrationRows] = await Promise.all([
         ctx.db.userCapacityModel.findUnique({ where: { userId } }),
         ctx.db.task.findMany({
           where: {
@@ -48,6 +48,8 @@ export const recommendationsRouter = router({
             importance: true,
             estimatedMinutes: true,
             dueDate: true,
+            areaId: true,
+            tags: { select: { tagId: true } },
           },
         }),
         ctx.db.taskDependency.findMany({
@@ -69,7 +71,16 @@ export const recommendationsRouter = router({
             },
           },
         }),
+        ctx.db.estimateCalibration.findMany({ where: { userId } }),
       ]);
+
+      const calibrations: CalibrationRow[] = calibrationRows.map((r) => ({
+        dimension: r.dimension as CalibrationDimension,
+        segment: r.segment,
+        multiplier: r.multiplier,
+        samples: r.samples,
+        confidence: r.confidence,
+      }));
 
       const capacity: CapacityModel = capacityRow
         ? {
@@ -94,18 +105,24 @@ export const recommendationsRouter = router({
       }
 
       const taskById = new Map(tasks.map((t) => [t.id, t]));
-      const recommendationBacklog: RecommendationTask[] = tasks.map((t) => ({
-        id: t.id,
-        name: t.name,
-        estimatedMinutes: t.estimatedMinutes,
-        stress: t.stress,
-        exhaustion: t.exhaustion,
-        urgency: t.urgency,
-        importance: t.importance,
-        dueDate: t.dueDate,
-        dependsOnTaskIds: depsByTask.get(t.id) ?? [],
-        alreadyDone: t.status === TaskStatus.DONE,
-      }));
+      const recommendationBacklog: RecommendationTask[] = tasks.map((t) => {
+        const ctxIds = { areaId: t.areaId, tagIds: t.tags.map((tg) => tg.tagId) };
+        return {
+          id: t.id,
+          name: t.name,
+          estimatedMinutes: t.estimatedMinutes,
+          stress: t.stress,
+          exhaustion: t.exhaustion,
+          urgency: t.urgency,
+          importance: t.importance,
+          dueDate: t.dueDate,
+          dependsOnTaskIds: depsByTask.get(t.id) ?? [],
+          alreadyDone: t.status === TaskStatus.DONE,
+          timeMultiplier: resolveMultiplier(calibrations, CalibrationDimension.TIME, ctxIds),
+          stressMultiplier: resolveMultiplier(calibrations, CalibrationDimension.STRESS, ctxIds),
+          exhaustionMultiplier: resolveMultiplier(calibrations, CalibrationDimension.EXHAUSTION, ctxIds),
+        };
+      });
 
       // Existing load per day, weighted by confidence.
       const existingLoad = new Map<string, ScheduledLoad>();

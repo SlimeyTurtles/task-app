@@ -1,7 +1,9 @@
 import { router, publicProcedure } from "./init";
 import { areasRouter } from "./routers/areas";
+import { calibrationRouter } from "./routers/calibration";
 import { capacityRouter } from "./routers/capacity";
 import { eventsRouter } from "./routers/events";
+import { metricsRouter } from "./routers/metrics";
 import { projectsRouter } from "./routers/projects";
 import { recommendationsRouter } from "./routers/recommendations";
 import { tagsRouter } from "./routers/tags";
@@ -18,6 +20,8 @@ export const appRouter = router({
   timeBlocks: timeBlocksRouter,
   capacity: capacityRouter,
   recommendations: recommendationsRouter,
+  calibration: calibrationRouter,
+  metrics: metricsRouter,
 });
 
 export type AppRouter = typeof appRouter;

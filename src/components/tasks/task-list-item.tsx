@@ -17,6 +17,7 @@ import {
 import { cn } from "@/lib/utils";
 import { formatRelativeDue } from "@/lib/format";
 import { trpc } from "@/lib/trpc/client";
+import { CompletionDialog } from "./completion-dialog";
 
 export type TaskListItemTask = {
   id: string;
@@ -52,6 +53,7 @@ export function TaskListItem({
     },
   });
   const [busy, setBusy] = useState(false);
+  const [completionOpen, setCompletionOpen] = useState(false);
 
   const done = task.status === TaskStatus.DONE;
   const dropped = task.status === TaskStatus.DROPPED;
@@ -59,12 +61,14 @@ export function TaskListItem({
   const dueOverdue = task.dueDate && new Date(task.dueDate) < new Date() && !done;
 
   async function toggleDone(next: boolean) {
+    if (next) {
+      // Marking done → open completion dialog (handles the actual mutation).
+      setCompletionOpen(true);
+      return;
+    }
     setBusy(true);
     try {
-      await update.mutateAsync({
-        id: task.id,
-        status: next ? TaskStatus.DONE : TaskStatus.INBOX,
-      });
+      await update.mutateAsync({ id: task.id, status: TaskStatus.INBOX });
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Failed to update task.");
     } finally {
@@ -170,6 +174,16 @@ export function TaskListItem({
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
+
+      <CompletionDialog
+        open={completionOpen}
+        onOpenChange={setCompletionOpen}
+        taskId={task.id}
+        taskName={task.name}
+        estimatedMinutes={task.estimatedMinutes}
+        estimatedStress={task.stress}
+        estimatedExhaustion={task.exhaustion}
+      />
     </div>
   );
 }

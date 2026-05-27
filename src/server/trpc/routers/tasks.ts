@@ -224,6 +224,42 @@ export const tasksRouter = router({
       await ctx.db.taskDependency.delete({ where: { id: input.id } });
       return { ok: true };
     }),
+
+  /** Mark a task DONE and (optionally) record retrospective metrics for calibration. */
+  markComplete: protectedProcedure
+    .input(
+      z.object({
+        id: z.string(),
+        actualMinutes: z.number().int().min(0).max(60 * 24 * 30).nullish(),
+        actualStress: StressInt.nullish(),
+        actualExhaustion: StressInt.nullish(),
+        actualValence: z.number().int().min(-5).max(5).nullish(),
+        retroNotes: z.string().trim().max(5000).nullish(),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      await assertTaskOwned(ctx, input.id);
+      const now = new Date();
+
+      return ctx.db.$transaction(async (tx) => {
+        await tx.task.update({
+          where: { id: input.id },
+          data: { status: TaskStatus.DONE, completedAt: now },
+        });
+        return tx.taskCompletion.create({
+          data: {
+            taskId: input.id,
+            userId: ctx.session.user.id,
+            completedAt: now,
+            actualMinutes: input.actualMinutes ?? null,
+            actualStress: input.actualStress ?? null,
+            actualExhaustion: input.actualExhaustion ?? null,
+            actualValence: input.actualValence ?? null,
+            retroNotes: input.retroNotes ?? null,
+          },
+        });
+      });
+    }),
 });
 
 // ---- helpers ----

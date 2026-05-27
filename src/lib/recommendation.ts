@@ -38,6 +38,10 @@ export type RecommendationTask = {
   dependsOnTaskIds: string[];
   /** If already scheduled (status = SCHEDULED), the proposed time is honored. */
   alreadyDone: boolean;
+  /** Calibration: 1.0 if no learned multiplier. Applied as estimate × multiplier. */
+  timeMultiplier?: number;
+  stressMultiplier?: number;
+  exhaustionMultiplier?: number;
 };
 
 export type ScheduledLoad = {
@@ -144,6 +148,14 @@ export function recommend(input: {
       continue;
     }
 
+    // Apply learned multipliers so the planner uses the calibrated cost.
+    const timeMult = t.timeMultiplier ?? 1;
+    const stressMult = t.stressMultiplier ?? 1;
+    const exhaustionMult = t.exhaustionMultiplier ?? 1;
+    const adjustedMinutes = Math.round(t.estimatedMinutes * timeMult);
+    const adjustedStress = t.stress != null ? t.stress * stressMult : 0;
+    const adjustedExhaustion = t.exhaustion != null ? t.exhaustion * exhaustionMult : 0;
+
     let placed: Suggestion | null = null;
     let lastReason = "No slot fits within the horizon.";
 
@@ -169,19 +181,17 @@ export function recommend(input: {
         continue;
       }
 
-      // Budget check.
-      const stressNeeded = t.stress ?? 0;
-      const exhaustionNeeded = t.exhaustion ?? 0;
-      if (dayLoad.stress + stressNeeded > input.capacity.dailyStressBudget) {
+      // Budget check (uses calibrated values).
+      if (dayLoad.stress + adjustedStress > input.capacity.dailyStressBudget) {
         lastReason = `Day exceeds stress budget (${input.capacity.dailyStressBudget}).`;
         continue;
       }
-      if (dayLoad.exhaustion + exhaustionNeeded > input.capacity.dailyExhaustionBudget) {
+      if (dayLoad.exhaustion + adjustedExhaustion > input.capacity.dailyExhaustionBudget) {
         lastReason = `Day exceeds exhaustion budget (${input.capacity.dailyExhaustionBudget}).`;
         continue;
       }
       const focusedMinutesBudget = input.capacity.dailyFocusedHours * 60;
-      if (dayLoad.minutes + t.estimatedMinutes > focusedMinutesBudget) {
+      if (dayLoad.minutes + adjustedMinutes > focusedMinutesBudget) {
         lastReason = `Day exceeds focused-hours budget (${input.capacity.dailyFocusedHours}h).`;
         continue;
       }
@@ -198,25 +208,26 @@ export function recommend(input: {
       }
       const dayEnd = startOfLocalDay(d);
       dayEnd.setHours(workingHours.endHour, 0, 0, 0);
-      const candidateEnd = new Date(candidateStart.getTime() + t.estimatedMinutes * 60_000);
+      const candidateEnd = new Date(candidateStart.getTime() + adjustedMinutes * 60_000);
       if (candidateEnd > dayEnd) {
         lastReason = "No work-hours slot left after cooldown / existing load.";
         continue;
       }
 
       // Place.
-      dayLoad.stress += stressNeeded;
-      dayLoad.exhaustion += exhaustionNeeded;
-      dayLoad.minutes += t.estimatedMinutes;
-      if (exhaustionNeeded >= 8) dayLoad.highExhaustionEnds.push(candidateEnd);
+      dayLoad.stress += adjustedStress;
+      dayLoad.exhaustion += adjustedExhaustion;
+      dayLoad.minutes += adjustedMinutes;
+      if (adjustedExhaustion >= 8) dayLoad.highExhaustionEnds.push(candidateEnd);
       dayCursor.set(key, candidateEnd);
       proposedDay.set(t.id, d);
 
       const reasonBits: string[] = [];
       reasonBits.push(`urgency ${t.urgency ?? "—"}/imp ${t.importance ?? "—"}`);
       if (t.dueDate) reasonBits.push(`due ${t.dueDate.toLocaleDateString()}`);
-      reasonBits.push(`${t.estimatedMinutes}m, stress ${t.stress ?? 0}, exh ${t.exhaustion ?? 0}`);
-      reasonBits.push(`fits day stress ${dayLoad.stress}/${input.capacity.dailyStressBudget}, exh ${dayLoad.exhaustion}/${input.capacity.dailyExhaustionBudget}`);
+      const calibratedTag = timeMult !== 1 || stressMult !== 1 || exhaustionMult !== 1 ? " (calibrated)" : "";
+      reasonBits.push(`${adjustedMinutes}m${calibratedTag}, stress ${adjustedStress.toFixed(1)}, exh ${adjustedExhaustion.toFixed(1)}`);
+      reasonBits.push(`fits day stress ${dayLoad.stress.toFixed(1)}/${input.capacity.dailyStressBudget}, exh ${dayLoad.exhaustion.toFixed(1)}/${input.capacity.dailyExhaustionBudget}`);
 
       placed = {
         taskId: t.id,

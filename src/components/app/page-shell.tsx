@@ -6,20 +6,22 @@ export function PageShell({
   actions,
   children,
 }: {
-  title: string;
+  title?: string;
   description?: string;
   actions?: ReactNode;
   children?: ReactNode;
 }) {
   return (
     <div className="flex flex-col gap-6 p-6 md:p-8 max-w-screen-2xl w-full">
-      <header className="flex items-start justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">{title}</h1>
-          {description ? <p className="text-muted-foreground mt-1">{description}</p> : null}
-        </div>
-        {actions}
-      </header>
+      {title ? (
+        <header className="flex items-start justify-between gap-4">
+          <div>
+            <h1 className="text-2xl font-semibold tracking-tight">{title}</h1>
+            {description ? <p className="text-muted-foreground mt-1">{description}</p> : null}
+          </div>
+          {actions}
+        </header>
+      ) : null}
       <div className="min-w-0">{children}</div>
     </div>
   );

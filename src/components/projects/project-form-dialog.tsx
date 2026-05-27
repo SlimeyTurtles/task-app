@@ -122,8 +122,9 @@ export function ProjectFormDialog({
           </div>
           <div className="grid sm:grid-cols-2 gap-3">
             <div className="grid gap-2">
-              <Label>Area</Label>
+              <Label htmlFor="project-area">Area</Label>
               <select
+                id="project-area"
                 className="h-9 rounded-md border border-input bg-transparent px-2 text-sm"
                 {...form.register("areaId")}
               >
@@ -136,8 +137,9 @@ export function ProjectFormDialog({
               </select>
             </div>
             <div className="grid gap-2">
-              <Label>Status</Label>
+              <Label htmlFor="project-status">Status</Label>
               <select
+                id="project-status"
                 className="h-9 rounded-md border border-input bg-transparent px-2 text-sm"
                 {...form.register("status")}
               >

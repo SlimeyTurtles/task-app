@@ -292,8 +292,9 @@ function TagDialog({
             ) : null}
           </div>
           <div className="grid gap-2">
-            <Label>Parent tag</Label>
+            <Label htmlFor="tag-parent">Parent tag</Label>
             <select
+              id="tag-parent"
               className="h-9 rounded-md border border-input bg-transparent px-2 text-sm"
               {...form.register("parentTagId")}
             >

@@ -216,10 +216,12 @@ function SelectField({
   disabled,
   ...rest
 }: React.SelectHTMLAttributes<HTMLSelectElement> & { label: string }) {
+  const id = `task-form-${label.replace(/\s+/g, "-").toLowerCase()}`;
   return (
     <div className="grid gap-2">
-      <Label>{label}</Label>
+      <Label htmlFor={id}>{label}</Label>
       <select
+        id={id}
         {...rest}
         disabled={disabled}
         className="h-9 rounded-md border border-input bg-transparent px-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50"
@@ -234,10 +236,11 @@ function NumberField({
   label,
   ...rest
 }: React.InputHTMLAttributes<HTMLInputElement> & { label: string }) {
+  const id = `task-form-${label.replace(/\s+/g, "-").toLowerCase()}`;
   return (
     <div className="grid gap-2">
-      <Label>{label}</Label>
-      <Input type="number" inputMode="numeric" {...rest} />
+      <Label htmlFor={id}>{label}</Label>
+      <Input id={id} type="number" inputMode="numeric" {...rest} />
     </div>
   );
 }

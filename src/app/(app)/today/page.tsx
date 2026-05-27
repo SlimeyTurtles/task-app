@@ -1,9 +1,10 @@
-import { PageShell, PhaseStub } from "@/components/app/page-shell";
+import { PageShell } from "@/components/app/page-shell";
+import { TodayClient } from "./today-client";
 
 export default function TodayPage() {
   return (
-    <PageShell title="Today" description="Your single-day calendar grid and quick capture.">
-      <PhaseStub phase={3} />
+    <PageShell>
+      <TodayClient />
     </PageShell>
   );
 }

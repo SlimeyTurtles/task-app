@@ -1,0 +1,527 @@
+// Task App — Prisma schema covering all six domains from the design doc.
+// Domains: 1) Users & Sharing, 2) Task hierarchy, 3) Tags, 4) Scheduling,
+// 5) Calibration, 6) API & Integrations.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ----------------------------------------------------------------------------
+// 1) Users & Sharing
+// ----------------------------------------------------------------------------
+
+model User {
+  id            String    @id @default(cuid())
+  email         String    @unique
+  name          String?
+  image         String?
+  emailVerified DateTime?
+  passwordHash  String?
+  settings      Json      @default("{}")
+  lastLoginAt   DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  accounts Account[]
+  sessions Session[]
+
+  areas          Area[]
+  projects       Project[]
+  tasks          Task[]
+  tags           Tag[]
+  events         Event[]
+  timeBlocks     TimeBlock[]
+  completions    TaskCompletion[]
+  capacityModel  UserCapacityModel?
+  calibrations   EstimateCalibration[]
+  apiKeys        ApiKey[]
+  webhooks       Webhook[]
+  outboundTaskShares TaskShare[] @relation("TaskShareOwner")
+  inboundTaskShares  TaskShare[] @relation("TaskShareGrantee")
+  outboundTagShares  TagShare[]  @relation("TagShareOwner")
+  inboundTagShares   TagShare[]  @relation("TagShareGrantee")
+}
+
+// NextAuth adapter tables
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String? @db.Text
+  access_token      String? @db.Text
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String? @db.Text
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+  @@index([userId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+}
+
+enum SharePermission {
+  READ
+  WRITE
+}
+
+model TaskShare {
+  id               String          @id @default(cuid())
+  taskId           String
+  ownerUserId      String
+  sharedWithUserId String
+  permission       SharePermission @default(READ)
+  expiresAt        DateTime?
+  createdAt        DateTime        @default(now())
+  updatedAt        DateTime        @updatedAt
+
+  task         Task @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  owner        User @relation("TaskShareOwner", fields: [ownerUserId], references: [id], onDelete: Cascade)
+  sharedWith   User @relation("TaskShareGrantee", fields: [sharedWithUserId], references: [id], onDelete: Cascade)
+
+  @@unique([taskId, sharedWithUserId])
+  @@index([sharedWithUserId])
+}
+
+model TagShare {
+  id               String          @id @default(cuid())
+  tagId            String
+  ownerUserId      String
+  sharedWithUserId String
+  permission       SharePermission @default(READ)
+  createdAt        DateTime        @default(now())
+  updatedAt        DateTime        @updatedAt
+
+  tag        Tag  @relation(fields: [tagId], references: [id], onDelete: Cascade)
+  owner      User @relation("TagShareOwner", fields: [ownerUserId], references: [id], onDelete: Cascade)
+  sharedWith User @relation("TagShareGrantee", fields: [sharedWithUserId], references: [id], onDelete: Cascade)
+
+  @@unique([tagId, sharedWithUserId])
+  @@index([sharedWithUserId])
+}
+
+// ----------------------------------------------------------------------------
+// 2) Task hierarchy: Area → Project → Task (+ subtasks, dependencies, recurrence)
+// ----------------------------------------------------------------------------
+
+model Area {
+  id          String  @id @default(cuid())
+  userId      String
+  name        String
+  description String?
+  color       String?
+  icon        String?
+  archived    Boolean @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  user     User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  projects Project[]
+  tasks    Task[]
+
+  @@index([userId])
+}
+
+enum ProjectStatus {
+  ACTIVE
+  PAUSED
+  DONE
+  ARCHIVED
+}
+
+model Project {
+  id                String        @id @default(cuid())
+  userId            String
+  areaId            String?
+  name              String
+  description       String?
+  definitionOfDone  String?
+  dueDate           DateTime?
+  status            ProjectStatus @default(ACTIVE)
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
+
+  user  User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  area  Area? @relation(fields: [areaId], references: [id], onDelete: SetNull)
+  tasks Task[]
+  tags  ProjectTag[]
+
+  @@index([userId])
+  @@index([areaId])
+}
+
+enum TaskStatus {
+  INBOX
+  SCHEDULED
+  IN_PROGRESS
+  DONE
+  DROPPED
+}
+
+model Task {
+  id               String     @id @default(cuid())
+  userId           String
+  areaId           String?
+  projectId        String?
+  parentTaskId     String?
+  templateTaskId   String? // when materialized from a recurring template
+  name             String
+  description      String?
+  definitionOfDone String?
+  status           TaskStatus @default(INBOX)
+
+  // Multi-dimensional metrics (all optional per design doc).
+  stress           Int? // 0-10
+  valence          Int? // -5..+5
+  exhaustion       Int? // 0-10
+  estimatedMinutes Int?
+  dueDate          DateTime?
+  urgency          Int? // 0-10
+  importance       Int? // 0-10
+
+  completedAt DateTime?
+  droppedAt   DateTime?
+  expiresAt   DateTime? // backlog TTL
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  area     Area?    @relation(fields: [areaId], references: [id], onDelete: SetNull)
+  project  Project? @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  parent   Task?    @relation("Subtasks", fields: [parentTaskId], references: [id], onDelete: SetNull)
+  subtasks Task[]   @relation("Subtasks")
+  template Task?    @relation("RecurrenceMaterializations", fields: [templateTaskId], references: [id], onDelete: SetNull)
+  materializations Task[] @relation("RecurrenceMaterializations")
+
+  outgoingDeps    TaskDependency[] @relation("BlockedTask")
+  incomingDeps    TaskDependency[] @relation("BlockerTask")
+  recurrenceRule  RecurrenceRule?
+  tags            TaskTag[]
+  attributions    EventTaskAttribution[]
+  completions     TaskCompletion[]
+  shares          TaskShare[]
+  externalLinks   ExternalAppLink[]
+
+  @@index([userId])
+  @@index([projectId])
+  @@index([areaId])
+  @@index([parentTaskId])
+  @@index([status])
+  @@index([dueDate])
+}
+
+enum DependencyKind {
+  FINISH_TO_START
+  START_TO_START
+}
+
+model TaskDependency {
+  id              String         @id @default(cuid())
+  taskId          String // the blocked task
+  dependsOnTaskId String // the blocker
+  kind            DependencyKind @default(FINISH_TO_START)
+  createdAt       DateTime       @default(now())
+
+  task      Task @relation("BlockedTask", fields: [taskId], references: [id], onDelete: Cascade)
+  dependsOn Task @relation("BlockerTask", fields: [dependsOnTaskId], references: [id], onDelete: Cascade)
+
+  @@unique([taskId, dependsOnTaskId])
+  @@index([dependsOnTaskId])
+}
+
+model RecurrenceRule {
+  id                  String   @id @default(cuid())
+  taskId              String   @unique
+  rrule               String // iCal RRULE string
+  timezone            String   @default("UTC")
+  exdates             Json     @default("[]") // exception dates
+  nextMaterializeAt   DateTime?
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  task Task @relation(fields: [taskId], references: [id], onDelete: Cascade)
+}
+
+// ----------------------------------------------------------------------------
+// 3) Tags (orthogonal to Area/Project; nested via parent_tag_id)
+// ----------------------------------------------------------------------------
+
+model Tag {
+  id          String  @id @default(cuid())
+  userId      String
+  parentTagId String?
+  name        String
+  color       String?
+  description String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  user     User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  parent   Tag?  @relation("TagTree", fields: [parentTagId], references: [id], onDelete: SetNull)
+  children Tag[] @relation("TagTree")
+
+  tasks    TaskTag[]
+  projects ProjectTag[]
+  shares   TagShare[]
+
+  @@index([userId])
+  @@index([parentTagId])
+}
+
+model TaskTag {
+  taskId String
+  tagId  String
+
+  task Task @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  tag  Tag  @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@id([taskId, tagId])
+  @@index([tagId])
+}
+
+model ProjectTag {
+  projectId String
+  tagId     String
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  tag     Tag     @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@id([projectId, tagId])
+  @@index([tagId])
+}
+
+// ----------------------------------------------------------------------------
+// 4) Scheduling & time tracking
+// ----------------------------------------------------------------------------
+
+enum EventKind {
+  ACTIVE
+  BACKGROUND
+}
+
+enum EventSource {
+  MANUAL
+  SUGGESTED
+  API
+  QUICK_LOG
+}
+
+model Event {
+  id         String      @id @default(cuid())
+  userId     String
+  startsAt   DateTime
+  endsAt     DateTime
+  notes      String?
+  kind       EventKind   @default(ACTIVE)
+  confidence Float       @default(1.0) // 0..1, derived
+  source     EventSource @default(MANUAL)
+  createdAt  DateTime    @default(now())
+  updatedAt  DateTime    @updatedAt
+
+  user         User                   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  attributions EventTaskAttribution[]
+
+  @@index([userId])
+  @@index([startsAt])
+}
+
+model EventTaskAttribution {
+  id            String  @id @default(cuid())
+  eventId       String
+  taskId        String
+  weight        Float   @default(1.0) // 0..1
+  ratioUnknown  Boolean @default(false)
+  createdAt     DateTime @default(now())
+
+  event Event @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  task  Task  @relation(fields: [taskId], references: [id], onDelete: Cascade)
+
+  @@unique([eventId, taskId])
+  @@index([taskId])
+}
+
+enum TimeBlockKind {
+  SLEEP
+  WORK_HOURS
+  FOCUS
+  REST
+  COMMUTE
+  MEAL
+  CUSTOM
+}
+
+model TimeBlock {
+  id                 String        @id @default(cuid())
+  userId             String
+  startsAt           DateTime
+  endsAt             DateTime
+  kind               TimeBlockKind @default(CUSTOM)
+  label              String?
+  rrule              String? // optional, for recurring blocks
+  schedulableOnTop   Boolean       @default(false)
+  createdAt          DateTime      @default(now())
+  updatedAt          DateTime      @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([startsAt])
+}
+
+// ----------------------------------------------------------------------------
+// 5) Calibration
+// ----------------------------------------------------------------------------
+
+model TaskCompletion {
+  id              String   @id @default(cuid())
+  taskId          String
+  userId          String
+  completedAt     DateTime @default(now())
+  actualMinutes   Int?
+  actualStress    Int? // 0-10
+  actualExhaustion Int? // 0-10
+  actualValence   Int? // -5..+5
+  retroNotes      String?
+  createdAt       DateTime @default(now())
+
+  task Task @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([taskId])
+  @@index([userId])
+}
+
+model UserCapacityModel {
+  userId                String   @id
+  dailyStressBudget     Float    @default(50)
+  dailyExhaustionBudget Float    @default(50)
+  dailyFocusedHours     Float    @default(5)
+  recoveryRules         Json     @default("[]") // e.g. [{ if: { exhaustionGte: 8 }, then: { cooldownHours: 12 } }]
+  lastTrainedAt         DateTime?
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+enum CalibrationDimension {
+  TIME
+  STRESS
+  EXHAUSTION
+}
+
+model EstimateCalibration {
+  id            String               @id @default(cuid())
+  userId        String
+  dimension     CalibrationDimension
+  segment       String // global | by_area:<id> | by_tag:<id>
+  multiplier    Float                @default(1.0)
+  samples       Int                  @default(0)
+  confidence    Float                @default(0.0)
+  lastTrainedAt DateTime?
+  createdAt     DateTime             @default(now())
+  updatedAt     DateTime             @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, dimension, segment])
+  @@index([userId])
+}
+
+// ----------------------------------------------------------------------------
+// 6) API & Integrations
+// ----------------------------------------------------------------------------
+
+model ApiKey {
+  id         String    @id @default(cuid())
+  userId     String
+  name       String
+  hashedKey  String    @unique
+  scopes     Json      @default("[]") // e.g. ["schedule:read", "tasks:write"]
+  expiresAt  DateTime?
+  lastUsedAt DateTime?
+  createdAt  DateTime  @default(now())
+
+  user          User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  externalLinks ExternalAppLink[]
+
+  @@index([userId])
+}
+
+model Webhook {
+  id                String   @id @default(cuid())
+  userId            String
+  url               String
+  subscribedEvents  Json     @default("[]") // e.g. ["task.completed", "task.rescheduled"]
+  secret            String
+  active            Boolean  @default(true)
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  user       User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  deliveries WebhookDelivery[]
+
+  @@index([userId])
+}
+
+model WebhookDelivery {
+  id              String   @id @default(cuid())
+  webhookId       String
+  eventType       String
+  payload         Json
+  attempts        Int      @default(0)
+  lastStatusCode  Int?
+  deliveredAt     DateTime?
+  nextRetryAt     DateTime?
+  createdAt       DateTime @default(now())
+
+  webhook Webhook @relation(fields: [webhookId], references: [id], onDelete: Cascade)
+
+  @@index([webhookId])
+  @@index([nextRetryAt])
+}
+
+model ExternalAppLink {
+  id         String  @id @default(cuid())
+  taskId     String
+  apiKeyId   String
+  appName    String // money | cooking | ...
+  externalId String
+  metadata   Json    @default("{}")
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  task   Task   @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  apiKey ApiKey @relation(fields: [apiKeyId], references: [id], onDelete: Cascade)
+
+  @@unique([appName, externalId, apiKeyId])
+  @@index([taskId])
+}

@@ -13,6 +13,17 @@ test("redesigned calendar: week default, drag-create, granularity, no scroll", a
   test.setTimeout(180_000);
   await page.emulateMedia({ colorScheme: "light" });
 
+  // Fail on React's "setState while rendering" / update-during-render errors.
+  const reactErrors: string[] = [];
+  page.on("console", (msg) => {
+    if (msg.type() === "error") {
+      const t = msg.text();
+      if (/Cannot update a component|while rendering a different component|setState/i.test(t)) {
+        reactErrors.push(t);
+      }
+    }
+  });
+
   await page.goto("/register");
   await page.getByLabel("Name").fill("CalRedesign");
   await page.getByLabel("Email").fill(EMAIL);
@@ -81,4 +92,6 @@ test("redesigned calendar: week default, drag-create, granularity, no scroll", a
   await expect(page.getByRole("menuitem", { name: /sign out/i })).toBeVisible();
   await page.getByRole("menuitem", { name: /sign out/i }).click();
   await page.waitForURL("**/login**", { timeout: 30_000 });
+
+  expect(reactErrors, reactErrors.join("\n")).toHaveLength(0);
 });

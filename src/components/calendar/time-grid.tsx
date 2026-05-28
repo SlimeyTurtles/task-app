@@ -82,7 +82,15 @@ export function TimeGrid({
 }) {
   const colsRef = useRef<HTMLDivElement>(null);
   const [height, setHeight] = useState(640);
-  const [drag, setDrag] = useState<DragState>(null);
+  const [drag, setDragState] = useState<DragState>(null);
+  // Mirror of `drag` so pointerup can read the latest value and commit
+  // *outside* of a state updater (committing inside the updater would call
+  // the parent's setState during render — the "setState while rendering" bug).
+  const dragRef = useRef<DragState>(null);
+  function setDrag(next: DragState) {
+    dragRef.current = next;
+    setDragState(next);
+  }
 
   useLayoutEffect(() => {
     const el = colsRef.current;
@@ -149,19 +157,16 @@ export function TimeGrid({
   useEffect(() => {
     if (!drag) return;
     function onMove(e: PointerEvent) {
+      const d = dragRef.current;
+      if (!d) return;
       const { dayIndex, min } = readPointer(e.clientX, e.clientY);
-      setDrag((d) => {
-        if (!d) return d;
-        const moved = d.moved || Math.abs(min - d.startMin) > DRAG_THRESHOLD_MIN || dayIndex !== d.startDayIndex;
-        return { ...d, curDayIndex: dayIndex, curMin: min, moved };
-      });
+      const moved = d.moved || Math.abs(min - d.startMin) > DRAG_THRESHOLD_MIN || dayIndex !== d.startDayIndex;
+      setDrag({ ...d, curDayIndex: dayIndex, curMin: min, moved });
     }
     function onUp() {
-      setDrag((d) => {
-        if (!d) return null;
-        commit(d);
-        return null;
-      });
+      const d = dragRef.current;
+      setDrag(null);
+      if (d) commit(d); // runs in the event handler, not during render
     }
     window.addEventListener("pointermove", onMove);
     window.addEventListener("pointerup", onUp);
@@ -240,15 +245,23 @@ export function TimeGrid({
       >
         {/* Hour rail */}
         <div className="relative">
-          {hours.map((h, i) => (
+          {hours.map((h, i) => {
+            const isFirst = i === 0;
+            const isLast = i === hours.length - 1;
+            if (isLast) return null; // 24:00 line coincides with the next day's top
+            return (
             <div
               key={h}
-              className="absolute right-1.5 -translate-y-1/2 text-[0.7rem] text-muted-foreground tabular-nums"
-              style={{ top: `${(i / (hours.length - 1)) * 100}%` }}
+              className={cn(
+                "absolute right-1.5 text-[0.7rem] text-muted-foreground tabular-nums",
+                isFirst ? "top-0" : "-translate-y-1/2",
+              )}
+              style={isFirst ? undefined : { top: `${(i / (hours.length - 1)) * 100}%` }}
             >
-              {i === 0 ? "" : formatHour(h)}
+              {formatHour(h)}
             </div>
-          ))}
+            );
+          })}
         </div>
 
         {/* Columns container (measured) */}

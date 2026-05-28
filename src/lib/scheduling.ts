@@ -1,6 +1,6 @@
 /** Scheduling / calendar layout helpers. All datetimes operate in the viewer's local timezone. */
 
-export const DAY_START_HOUR = 6;
+export const DAY_START_HOUR = 0;
 export const DAY_END_HOUR = 24;
 export const HOURS_VISIBLE = DAY_END_HOUR - DAY_START_HOUR;
 export const PX_PER_HOUR = 56;

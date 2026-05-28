@@ -1,10 +1,5 @@
-import { PageShell } from "@/components/app/page-shell";
-import { WeekClient } from "./week-client";
+import { redirect } from "next/navigation";
 
 export default function WeekPage() {
-  return (
-    <PageShell>
-      <WeekClient />
-    </PageShell>
-  );
+  redirect("/calendar");
 }

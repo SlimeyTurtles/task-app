@@ -18,7 +18,7 @@ test("phase 5 — completion dialog, calibration, metrics", async ({ page }) => 
   await page.getByLabel("Email").fill(EMAIL);
   await page.getByLabel("Password").fill(PASSWORD);
   await page.getByRole("button", { name: /create account/i }).click();
-  await page.waitForURL("**/today", { timeout: 30_000 });
+  await page.waitForURL("**/calendar", { timeout: 30_000 });
 
   // Seed a task with estimates.
   await page.goto("/inbox");

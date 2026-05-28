@@ -1,5 +1,4 @@
 import {
-  Calendar,
   CalendarDays,
   Inbox,
   Folders,
@@ -37,8 +36,7 @@ export const NAV: NavSection[] = [
   {
     label: "Plan",
     items: [
-      { href: "/today", label: "Today", icon: Calendar, phase: 3 },
-      { href: "/week", label: "Week", icon: CalendarDays, phase: 3 },
+      { href: "/calendar", label: "Calendar", icon: CalendarDays, phase: 3 },
       { href: "/inbox", label: "Inbox", icon: Inbox, phase: 2 },
       { href: "/tasks", label: "All Tasks", icon: ListChecks, phase: 2 },
     ],

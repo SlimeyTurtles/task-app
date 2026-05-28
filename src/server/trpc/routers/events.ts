@@ -186,6 +186,45 @@ export const eventsRouter = router({
         },
       });
     }),
+
+  /**
+   * "Drop on calendar": place a 1-hour block for a task at the next free-ish
+   * slot today (rounded to the next half hour), so the user can drag it to
+   * the right spot. Falls back to tomorrow morning if it's late.
+   */
+  dropOnCalendar: protectedProcedure
+    .input(z.object({ taskId: z.string(), estimatedMinutes: z.number().int().min(1).max(24 * 60).optional() }))
+    .mutation(async ({ ctx, input }) => {
+      await assertTasksOwned(ctx, [input.taskId]);
+
+      const now = new Date();
+      const start = new Date(now);
+      // round up to the next half hour
+      start.setSeconds(0, 0);
+      const mins = start.getMinutes();
+      start.setMinutes(mins <= 0 ? 0 : mins <= 30 ? 30 : 60);
+      // if past 21:00, drop tomorrow at 9am
+      if (start.getHours() >= 21) {
+        start.setDate(start.getDate() + 1);
+        start.setHours(9, 0, 0, 0);
+      } else if (start.getHours() < 6) {
+        start.setHours(9, 0, 0, 0);
+      }
+      const dur = input.estimatedMinutes ?? 60;
+      const endsAt = new Date(start.getTime() + dur * 60_000);
+
+      return ctx.db.event.create({
+        data: {
+          userId: ctx.session.user.id,
+          startsAt: start,
+          endsAt,
+          kind: EventKind.ACTIVE,
+          source: EventSource.QUICK_LOG,
+          confidence: 1,
+          attributions: { create: { taskId: input.taskId, weight: 1, ratioUnknown: false } },
+        },
+      });
+    }),
 });
 
 function computeConfidence(lazy: boolean, startsAt: Date, endsAt: Date): number {

@@ -14,7 +14,7 @@ async function register(page: Page, name: string, email: string) {
   await page.getByLabel("Email").fill(email);
   await page.getByLabel("Password").fill(PASSWORD);
   await page.getByRole("button", { name: /create account/i }).click();
-  await page.waitForURL("**/today", { timeout: 30_000 });
+  await page.waitForURL("**/calendar", { timeout: 30_000 });
 }
 
 async function quickAdd(page: Page, name: string) {

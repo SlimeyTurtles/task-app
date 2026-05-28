@@ -24,9 +24,9 @@ export async function proxy(req: NextRequest) {
     return NextResponse.redirect(url);
   }
 
-  // Authenticated users hitting `/` go to Today.
+  // Authenticated users hitting `/` go to the calendar (week view).
   if (pathname === "/") {
-    return NextResponse.redirect(new URL("/today", req.url));
+    return NextResponse.redirect(new URL("/calendar", req.url));
   }
 
   return NextResponse.next();

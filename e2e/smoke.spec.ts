@@ -19,7 +19,7 @@ test("full Phase 1+2 smoke", async ({ page }) => {
   await page.getByLabel("Password").fill(PASSWORD);
   await page.screenshot({ path: shot("01-register") });
   await page.getByRole("button", { name: /create account/i }).click();
-  await page.waitForURL("**/today", { timeout: 30_000 });
+  await page.waitForURL("**/calendar", { timeout: 30_000 });
   await page.screenshot({ path: shot("02-today") });
 
   // ── Create an Area ──

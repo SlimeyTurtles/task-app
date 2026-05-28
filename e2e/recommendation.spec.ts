@@ -18,7 +18,7 @@ test("phase 4 — capacity edit, time block, plan-ahead suggestions", async ({ p
   await page.getByLabel("Email").fill(EMAIL);
   await page.getByLabel("Password").fill(PASSWORD);
   await page.getByRole("button", { name: /create account/i }).click();
-  await page.waitForURL("**/today", { timeout: 30_000 });
+  await page.waitForURL("**/calendar", { timeout: 30_000 });
 
   // ── Edit capacity model ──
   await page.goto("/settings/capacity");
@@ -76,7 +76,7 @@ test("phase 4 — capacity edit, time block, plan-ahead suggestions", async ({ p
   }
 
   // ── Open Plan Ahead and accept all ──
-  await page.goto("/today");
+  await page.goto("/calendar");
   await page.getByRole("button", { name: /plan ahead/i }).click();
   const planDialog = page.getByRole("dialog");
   await expect(planDialog).toBeVisible();

@@ -12,8 +12,9 @@ export function Sidebar() {
   return (
     <aside className="hidden md:flex md:w-60 md:flex-col border-r bg-sidebar text-sidebar-foreground">
       <div className="px-4 py-5 border-b">
-        <Link href="/today" className="font-semibold text-lg tracking-tight">
-          Task App
+        <Link href="/calendar" className="flex items-baseline gap-1.5">
+          <span className="font-heading text-2xl font-semibold tracking-tight">Almanac</span>
+          <span className="size-1.5 rounded-full bg-primary -translate-y-0.5" />
         </Link>
       </div>
       <nav className="flex-1 overflow-y-auto py-4 px-2 space-y-6">

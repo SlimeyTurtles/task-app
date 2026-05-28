@@ -2,6 +2,7 @@
 
 import { useState, type ReactNode } from "react";
 import { SessionProvider } from "next-auth/react";
+import { ThemeProvider } from "next-themes";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { httpBatchLink } from "@trpc/client";
 import superjson from "superjson";
@@ -39,10 +40,12 @@ export function Providers({ children }: { children: ReactNode }) {
   );
 
   return (
-    <SessionProvider>
-      <trpc.Provider client={trpcClient} queryClient={queryClient}>
-        <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
-      </trpc.Provider>
-    </SessionProvider>
+    <ThemeProvider attribute="class" defaultTheme="system" enableSystem disableTransitionOnChange>
+      <SessionProvider>
+        <trpc.Provider client={trpcClient} queryClient={queryClient}>
+          <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+        </trpc.Provider>
+      </SessionProvider>
+    </ThemeProvider>
   );
 }

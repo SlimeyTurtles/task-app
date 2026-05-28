@@ -1,10 +1,5 @@
-import { PageShell } from "@/components/app/page-shell";
-import { TodayClient } from "./today-client";
+import { redirect } from "next/navigation";
 
 export default function TodayPage() {
-  return (
-    <PageShell>
-      <TodayClient />
-    </PageShell>
-  );
+  redirect("/calendar");
 }

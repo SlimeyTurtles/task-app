@@ -13,7 +13,7 @@ import { Label } from "@/components/ui/label";
 export function LoginForm() {
   const router = useRouter();
   const search = useSearchParams();
-  const callbackUrl = search.get("callbackUrl") || "/today";
+  const callbackUrl = search.get("callbackUrl") || "/calendar";
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
 

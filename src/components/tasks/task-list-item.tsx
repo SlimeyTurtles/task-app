@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Check, MoreHorizontal, RotateCcw, Share2, Trash2, Undo2 } from "lucide-react";
+import { CalendarPlus, Check, MoreHorizontal, RotateCcw, Share2, Trash2, Undo2 } from "lucide-react";
 import { TaskStatus } from "@prisma/client";
 import { toast } from "sonner";
 
@@ -52,6 +52,13 @@ export function TaskListItem({
     onSuccess: () => {
       void utils.tasks.list.invalidate();
     },
+  });
+  const dropOnCalendar = trpc.events.dropOnCalendar.useMutation({
+    onSuccess: () => {
+      void utils.events.list.invalidate();
+      toast.success("Dropped on your calendar — drag it to the right spot.");
+    },
+    onError: (e) => toast.error(e.message),
   });
   const [busy, setBusy] = useState(false);
   const [completionOpen, setCompletionOpen] = useState(false);
@@ -171,6 +178,18 @@ export function TaskListItem({
               <Undo2 className="size-4 mr-2" /> Move back to inbox
             </DropdownMenuItem>
           )}
+          {!done && !dropped ? (
+            <DropdownMenuItem
+              onClick={() =>
+                dropOnCalendar.mutate({
+                  taskId: task.id,
+                  estimatedMinutes: task.estimatedMinutes ?? undefined,
+                })
+              }
+            >
+              <CalendarPlus className="size-4 mr-2" /> Drop on calendar
+            </DropdownMenuItem>
+          ) : null}
           {!dropped ? (
             <DropdownMenuItem onClick={() => setStatus(TaskStatus.DROPPED)}>
               <RotateCcw className="size-4 mr-2" /> Drop

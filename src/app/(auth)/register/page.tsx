@@ -47,7 +47,7 @@ export default function RegisterPage() {
       window.location.href = "/login";
       return;
     }
-    window.location.href = "/today";
+    window.location.href = "/calendar";
   }
 
   return (

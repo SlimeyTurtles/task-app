@@ -7,7 +7,6 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
-  DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
@@ -31,12 +30,12 @@ export function UserMenu() {
         }
       />
       <DropdownMenuContent align="end" className="w-56">
-        <DropdownMenuLabel className="font-normal">
-          <div className="text-sm font-medium">{name}</div>
+        <div className="px-2 py-1.5">
+          <div className="text-sm font-medium truncate">{name}</div>
           {session?.user?.email ? (
-            <div className="text-xs text-muted-foreground">{session.user.email}</div>
+            <div className="text-xs text-muted-foreground truncate">{session.user.email}</div>
           ) : null}
-        </DropdownMenuLabel>
+        </div>
         <DropdownMenuSeparator />
         <DropdownMenuItem onClick={() => signOut({ callbackUrl: "/login" })}>
           <LogOut className="mr-2 size-4" />

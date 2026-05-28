@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Check, MoreHorizontal, RotateCcw, Trash2, Undo2 } from "lucide-react";
+import { Check, MoreHorizontal, RotateCcw, Share2, Trash2, Undo2 } from "lucide-react";
 import { TaskStatus } from "@prisma/client";
 import { toast } from "sonner";
 
@@ -18,6 +18,7 @@ import { cn } from "@/lib/utils";
 import { formatRelativeDue } from "@/lib/format";
 import { trpc } from "@/lib/trpc/client";
 import { CompletionDialog } from "./completion-dialog";
+import { ShareDialog } from "@/components/sharing/share-dialog";
 
 export type TaskListItemTask = {
   id: string;
@@ -54,6 +55,7 @@ export function TaskListItem({
   });
   const [busy, setBusy] = useState(false);
   const [completionOpen, setCompletionOpen] = useState(false);
+  const [shareOpen, setShareOpen] = useState(false);
 
   const done = task.status === TaskStatus.DONE;
   const dropped = task.status === TaskStatus.DROPPED;
@@ -149,31 +151,51 @@ export function TaskListItem({
       <DropdownMenu>
         <DropdownMenuTrigger
           render={
-            <Button variant="ghost" size="icon" className="size-7 opacity-0 group-hover:opacity-100">
+            <Button
+              variant="ghost"
+              size="icon"
+              aria-label="Task actions"
+              className="size-7 opacity-0 group-hover:opacity-100 focus-visible:opacity-100 data-popup-open:opacity-100"
+            >
               <MoreHorizontal className="size-4" />
             </Button>
           }
         />
         <DropdownMenuContent align="end">
           {!done ? (
-            <DropdownMenuItem onSelect={() => setStatus(TaskStatus.DONE)}>
+            <DropdownMenuItem onClick={() => setStatus(TaskStatus.DONE)}>
               <Check className="size-4 mr-2" /> Mark done
             </DropdownMenuItem>
           ) : (
-            <DropdownMenuItem onSelect={() => setStatus(TaskStatus.INBOX)}>
+            <DropdownMenuItem onClick={() => setStatus(TaskStatus.INBOX)}>
               <Undo2 className="size-4 mr-2" /> Move back to inbox
             </DropdownMenuItem>
           )}
           {!dropped ? (
-            <DropdownMenuItem onSelect={() => setStatus(TaskStatus.DROPPED)}>
+            <DropdownMenuItem onClick={() => setStatus(TaskStatus.DROPPED)}>
               <RotateCcw className="size-4 mr-2" /> Drop
             </DropdownMenuItem>
           ) : null}
-          <DropdownMenuItem onSelect={remove} className="text-destructive focus:text-destructive">
+          <DropdownMenuItem
+            onClick={() => {
+              // Defer so the menu finishes closing before the dialog opens —
+              // otherwise base-ui's focus restoration cancels the dialog.
+              setTimeout(() => setShareOpen(true), 0);
+            }}
+          >
+            <Share2 className="size-4 mr-2" /> Share
+          </DropdownMenuItem>
+          <DropdownMenuItem onClick={remove} className="text-destructive focus:text-destructive">
             <Trash2 className="size-4 mr-2" /> Delete
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
+
+      <ShareDialog
+        open={shareOpen}
+        onOpenChange={setShareOpen}
+        target={{ kind: "task", id: task.id, name: task.name }}
+      />
 
       <CompletionDialog
         open={completionOpen}

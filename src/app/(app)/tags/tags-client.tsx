@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { ChevronRight, Pencil, Plus, Trash2 } from "lucide-react";
+import { ChevronRight, Pencil, Plus, Share2, Trash2 } from "lucide-react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
@@ -16,6 +16,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 import { trpc } from "@/lib/trpc/client";
+import { ShareDialog, type ShareTarget } from "@/components/sharing/share-dialog";
 
 type TagRow = {
   id: string;
@@ -59,6 +60,7 @@ export function TagsClient() {
     tag?: TagRow | null;
     parentTagId?: string | null;
   }>({ open: false });
+  const [shareTarget, setShareTarget] = useState<ShareTarget | null>(null);
 
   const tree = useMemo(() => buildTree(tags ?? []), [tags]);
 
@@ -95,6 +97,7 @@ export function TagsClient() {
                   depth={0}
                   onAddChild={(id) => openNew(id)}
                   onEdit={openEdit}
+                  onShare={(node) => setShareTarget({ kind: "tag", id: node.id, name: node.name })}
                   onDelete={(id, name) => {
                     if (!confirm(`Delete tag "${name}"? Child tags will be re-parented to its parent.`)) return;
                     del.mutate({ id }, { onError: (e) => toast.error(e.message) });
@@ -113,6 +116,14 @@ export function TagsClient() {
         parentTagId={dialog.parentTagId}
         allTags={tags ?? []}
       />
+
+      <ShareDialog
+        open={shareTarget !== null}
+        onOpenChange={(open) => {
+          if (!open) setShareTarget(null);
+        }}
+        target={shareTarget}
+      />
     </>
   );
 }
@@ -122,12 +133,14 @@ function TreeRow({
   depth,
   onAddChild,
   onEdit,
+  onShare,
   onDelete,
 }: {
   node: TreeNode;
   depth: number;
   onAddChild: (id: string) => void;
   onEdit: (tag: TagRow) => void;
+  onShare: (node: TreeNode) => void;
   onDelete: (id: string, name: string) => void;
 }) {
   const [expanded, setExpanded] = useState(true);
@@ -164,6 +177,9 @@ function TreeRow({
           <Button variant="ghost" size="icon" className="size-7" onClick={() => onEdit(node)}>
             <Pencil className="size-3.5" />
           </Button>
+          <Button variant="ghost" size="icon" className="size-7" onClick={() => onShare(node)}>
+            <Share2 className="size-3.5" />
+          </Button>
           <Button
             variant="ghost"
             size="icon"
@@ -183,6 +199,7 @@ function TreeRow({
               depth={depth + 1}
               onAddChild={onAddChild}
               onEdit={onEdit}
+              onShare={onShare}
               onDelete={onDelete}
             />
           ))}

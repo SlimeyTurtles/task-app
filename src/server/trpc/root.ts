@@ -6,6 +6,7 @@ import { eventsRouter } from "./routers/events";
 import { metricsRouter } from "./routers/metrics";
 import { projectsRouter } from "./routers/projects";
 import { recommendationsRouter } from "./routers/recommendations";
+import { sharingRouter } from "./routers/sharing";
 import { tagsRouter } from "./routers/tags";
 import { tasksRouter } from "./routers/tasks";
 import { timeBlocksRouter } from "./routers/time-blocks";
@@ -22,6 +23,7 @@ export const appRouter = router({
   recommendations: recommendationsRouter,
   calibration: calibrationRouter,
   metrics: metricsRouter,
+  sharing: sharingRouter,
 });
 
 export type AppRouter = typeof appRouter;

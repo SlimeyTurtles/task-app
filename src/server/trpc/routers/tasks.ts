@@ -3,6 +3,7 @@ import { DependencyKind, TaskStatus, type Prisma } from "@prisma/client";
 import { z } from "zod";
 
 import { protectedProcedure, router } from "../init";
+import { getTaskAccess, canRead, canWrite } from "@/server/lib/access";
 
 const StressInt = z.number().int().min(0).max(10);
 const ValenceInt = z.number().int().min(-5).max(5);
@@ -89,8 +90,11 @@ export const tasksRouter = router({
   }),
 
   get: protectedProcedure.input(z.object({ id: z.string() })).query(async ({ ctx, input }) => {
-    const task = await ctx.db.task.findFirst({
-      where: { id: input.id, userId: ctx.session.user.id },
+    // Readable by the owner or anyone the task (or one of its tags) is shared with.
+    const access = await getTaskAccess(ctx.db, ctx.session.user.id, input.id);
+    if (!canRead(access)) throw new TRPCError({ code: "NOT_FOUND" });
+    const task = await ctx.db.task.findUnique({
+      where: { id: input.id },
       include: {
         area: true,
         project: true,
@@ -130,8 +134,23 @@ export const tasksRouter = router({
     .input(TaskInput.partial().extend({ id: z.string() }))
     .mutation(async ({ ctx, input }) => {
       const { id, tagIds, ...data } = input;
-      await assertTaskOwned(ctx, id);
-      await assertReferencedOwned(ctx, data);
+      const access = await getTaskAccess(ctx.db, ctx.session.user.id, id);
+      if (!canWrite(access)) {
+        throw new TRPCError({ code: "FORBIDDEN", message: "No write access to this task." });
+      }
+      const isOwner = access === "owner";
+
+      let effectiveTagIds = tagIds;
+      if (isOwner) {
+        await assertReferencedOwned(ctx, data);
+      } else {
+        // Collaborators may edit metrics / status / text, but not the owner's
+        // org structure (area / project / parent) or tag set.
+        delete (data as { areaId?: unknown }).areaId;
+        delete (data as { projectId?: unknown }).projectId;
+        delete (data as { parentTaskId?: unknown }).parentTaskId;
+        effectiveTagIds = undefined;
+      }
 
       // Treat status transitions to DONE/DROPPED as setting the corresponding timestamps.
       if (data.status === TaskStatus.DONE) (data as Prisma.TaskUpdateInput).completedAt = new Date();
@@ -139,11 +158,11 @@ export const tasksRouter = router({
 
       return ctx.db.$transaction(async (tx) => {
         const updated = await tx.task.update({ where: { id }, data });
-        if (tagIds) {
+        if (effectiveTagIds) {
           await tx.taskTag.deleteMany({ where: { taskId: id } });
-          if (tagIds.length) {
+          if (effectiveTagIds.length) {
             await tx.taskTag.createMany({
-              data: tagIds.map((tagId) => ({ taskId: id, tagId })),
+              data: effectiveTagIds.map((tagId) => ({ taskId: id, tagId })),
               skipDuplicates: true,
             });
           }
@@ -238,7 +257,10 @@ export const tasksRouter = router({
       }),
     )
     .mutation(async ({ ctx, input }) => {
-      await assertTaskOwned(ctx, input.id);
+      const access = await getTaskAccess(ctx.db, ctx.session.user.id, input.id);
+      if (!canWrite(access)) {
+        throw new TRPCError({ code: "FORBIDDEN", message: "No write access to this task." });
+      }
       const now = new Date();
 
       return ctx.db.$transaction(async (tx) => {

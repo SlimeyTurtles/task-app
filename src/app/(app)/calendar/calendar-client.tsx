@@ -22,6 +22,7 @@ function defaultView(): CalendarView {
 export function CalendarClient() {
   const [view, setViewState] = useState<CalendarView>(defaultView);
   const [navOffset, setNavOffset] = useState(0);
+  const [hourHeight, setHourHeight] = useState(48);
   const [dialog, setDialog] = useState<EventDialogState>({ open: false });
   const [planOpen, setPlanOpen] = useState(false);
 
@@ -78,7 +79,12 @@ export function CalendarClient() {
         </div>
 
         <div className="flex items-center gap-2">
-          <ViewControl view={view} onChange={setView} />
+          <ViewControl
+            view={view}
+            onChange={setView}
+            hourHeight={hourHeight}
+            onHourHeightChange={setHourHeight}
+          />
           <Button variant="outline" onClick={() => setPlanOpen(true)}>
             <Sparkles className="size-4" /> Plan ahead
           </Button>
@@ -95,6 +101,7 @@ export function CalendarClient() {
             days={days}
             events={gridEvents}
             timeBlocks={(blocks ?? []) as never}
+            hourHeight={hourHeight}
             onCreateRange={(start, end) => setDialog({ open: true, init: { startsAt: start, endsAt: end } })}
             onEditEvent={(eventId) => setDialog({ open: true, eventId })}
             onMoveEvent={(eventId, start, end) => update.mutate({ id: eventId, startsAt: start, endsAt: end })}

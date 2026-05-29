@@ -68,7 +68,17 @@ const PRESETS: { label: string; before: number; after: number }[] = [
   { label: "Month", before: 0, after: 29 },
 ];
 
-export function ViewControl({ view, onChange }: { view: CalendarView; onChange: (v: CalendarView) => void }) {
+export function ViewControl({
+  view,
+  onChange,
+  hourHeight,
+  onHourHeightChange,
+}: {
+  view: CalendarView;
+  onChange: (v: CalendarView) => void;
+  hourHeight: number;
+  onHourHeightChange: (h: number) => void;
+}) {
   const [open, setOpen] = useState(false);
   const [monthAnchor, setMonthAnchor] = useState(() => startOfMonth(new Date()));
   const [dragStart, setDragStart] = useState<Date | null>(null);
@@ -156,10 +166,10 @@ export function ViewControl({ view, onChange }: { view: CalendarView; onChange: 
             </button>
           ))}
         </div>
-        <p className="text-xs text-muted-foreground mb-3">
+        <p className="text-xs text-muted-foreground mb-3 h-4 leading-4">
           {view.mode === "rolling"
-            ? "Window slides with today, every day."
-            : "Fixed dates — page with ‹ › ; stays put until you move it."}
+            ? "Slides with today, every day."
+            : "Fixed dates — page with ‹ ›."}
         </p>
 
         {/* Presets */}
@@ -245,7 +255,7 @@ export function ViewControl({ view, onChange }: { view: CalendarView; onChange: 
                   <span
                     className={cn(
                       "inline-flex items-center justify-center size-6 rounded-full",
-                      isToday && !inRange && "ring-1 ring-primary",
+                      isToday && "ring-1 ring-primary ring-inset font-semibold",
                       (isStart || isEnd) && "bg-primary text-primary-foreground",
                     )}
                   >
@@ -260,6 +270,26 @@ export function ViewControl({ view, onChange }: { view: CalendarView; onChange: 
         <p className="text-xs text-muted-foreground mt-3">
           {rangeSummary(view)}
         </p>
+
+        {/* Hour height (zoom) — taller rows scroll inside the calendar. */}
+        <div className="mt-3 pt-3 border-t">
+          <div className="flex items-center justify-between mb-1.5">
+            <span className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
+              Hour height
+            </span>
+            <span className="text-xs text-muted-foreground tabular-nums">{hourHeight}px</span>
+          </div>
+          <input
+            type="range"
+            min={28}
+            max={120}
+            step={4}
+            value={hourHeight}
+            onChange={(e) => onHourHeightChange(Number(e.target.value))}
+            className="w-full accent-primary"
+            aria-label="Hour height"
+          />
+        </div>
       </PopoverContent>
     </Popover>
   );

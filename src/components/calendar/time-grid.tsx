@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useLayoutEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
+import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { EventKind } from "@prisma/client";
 
 import { cn } from "@/lib/utils";
@@ -74,6 +74,7 @@ export function TimeGrid({
   days,
   events,
   timeBlocks,
+  hourHeight,
   onCreateRange,
   onMoveEvent,
   onResizeEvent,
@@ -82,13 +83,15 @@ export function TimeGrid({
   days: Date[];
   events: GridEvent[];
   timeBlocks: GridBlock[];
+  /** Fixed pixels per hour. The grid is 24·hourHeight tall and scrolls internally. */
+  hourHeight: number;
   onCreateRange: (start: Date, end: Date) => void;
   onMoveEvent: (eventId: string, start: Date, end: Date) => void;
   onResizeEvent: (eventId: string, start: Date, end: Date) => void;
   onEditEvent: (eventId: string) => void;
 }) {
   const colsRef = useRef<HTMLDivElement>(null);
-  const [height, setHeight] = useState(640);
+  const scrollRef = useRef<HTMLDivElement>(null);
   const [drag, setDragState] = useState<DragState>(null);
   const dragRef = useRef<DragState>(null);
   function setDrag(next: DragState) {
@@ -96,16 +99,14 @@ export function TimeGrid({
     setDragState(next);
   }
 
-  useLayoutEffect(() => {
-    const el = colsRef.current;
-    if (!el) return;
-    const ro = new ResizeObserver(() => setHeight(el.clientHeight));
-    ro.observe(el);
-    setHeight(el.clientHeight);
-    return () => ro.disconnect();
-  }, []);
+  const totalHeight = 24 * hourHeight;
+  const pxPerMin = hourHeight / 60;
 
-  const pxPerMin = height / WINDOW_MINUTES;
+  // On mount, scroll to ~7 AM so the morning is in view (off-hours are above/below).
+  useEffect(() => {
+    if (scrollRef.current) scrollRef.current.scrollTop = 7 * hourHeight;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   function readPointer(clientX: number, clientY: number): { dayIndex: number; min: number } {
     const el = colsRef.current!;
@@ -223,12 +224,18 @@ export function TimeGrid({
 
   const hours = Array.from({ length: 25 }, (_, i) => i);
 
+  const colsTemplate = `3.25rem repeat(${days.length}, minmax(0,1fr))`;
+
   return (
-    <div className="flex flex-col h-full min-h-0 select-none">
-      {/* Day headers */}
+    <div
+      ref={scrollRef}
+      data-testid="time-grid"
+      className="flex flex-col h-full min-h-0 overflow-y-auto select-none"
+    >
+      {/* Day headers (sticky so they stay visible while hours scroll) */}
       <div
-        className="grid shrink-0 border-b"
-        style={{ gridTemplateColumns: `3.25rem repeat(${days.length}, minmax(0,1fr))` }}
+        className="grid shrink-0 sticky top-0 z-30 border-b bg-card"
+        style={{ gridTemplateColumns: colsTemplate }}
       >
         <div />
         {days.map((d) => {
@@ -246,8 +253,8 @@ export function TimeGrid({
         })}
       </div>
 
-      {/* Body */}
-      <div className="grid flex-1 min-h-0" style={{ gridTemplateColumns: `3.25rem repeat(${days.length}, minmax(0,1fr))` }}>
+      {/* Body — fixed total height; the container above scrolls. */}
+      <div className="grid shrink-0" style={{ gridTemplateColumns: colsTemplate, height: totalHeight }}>
         {/* Hour rail */}
         <div className="relative">
           {hours.map((h, i) => {
@@ -270,7 +277,6 @@ export function TimeGrid({
         {/* Columns */}
         <div
           ref={colsRef}
-          data-testid="time-grid"
           className="relative grid"
           style={{ gridColumn: `2 / span ${days.length}`, gridTemplateColumns: `repeat(${days.length}, minmax(0,1fr))` }}
         >

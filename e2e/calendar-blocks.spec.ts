@@ -113,11 +113,15 @@ test("overnight recurring block shows a morning segment on the first visible day
   await dialog.getByRole("button", { name: /add block/i }).click();
   await expect(dialog).toBeHidden();
   await page.waitForTimeout(500);
+
+  // The grid defaults to ~7 AM; scroll to the top so the midnight band is in view.
+  const grid = page.getByTestId("time-grid");
+  await grid.evaluate((el) => (el.scrollTop = 0));
+  await page.waitForTimeout(200);
   await page.screenshot({ path: shot("blk-04-overnight") });
 
   // Find a "Sleep" label in the first day column near the top of the grid
   // (the Monday-morning continuation from Sunday night).
-  const grid = page.getByTestId("time-grid");
   const g = (await grid.boundingBox())!;
   const sleeps = page.getByText("Sleep", { exact: true });
   const n = await sleeps.count();

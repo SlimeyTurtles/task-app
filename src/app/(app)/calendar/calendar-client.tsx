@@ -78,7 +78,7 @@ export function CalendarClient() {
 
   const utils = trpc.useUtils();
   const { data: events } = trpc.events.list.useQuery({ start: fetchStart, end: fetchEnd });
-  const { data: blocks } = trpc.timeBlocks.list.useQuery({ start: fetchStart, end: fetchEnd });
+  const { data: blocks } = trpc.timeBlocks.occurrences.useQuery({ start: fetchStart, end: fetchEnd });
 
   const update = trpc.events.update.useMutation({
     onSuccess: () => utils.events.list.invalidate(),

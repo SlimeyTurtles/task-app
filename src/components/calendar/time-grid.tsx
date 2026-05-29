@@ -391,8 +391,10 @@ function DayColumn({
             }}
           >
             <div className="px-1.5 py-0.5 font-medium leading-tight truncate">{label}</div>
-            <div className="px-1.5 text-[0.62rem] text-muted-foreground tabular-nums">
-              {formatTime(ev.startsAt)}
+            <div className="px-1.5 text-[0.62rem] text-muted-foreground tabular-nums truncate">
+              {ev.startsAt.getTime() < dayStart ? "… " : formatTime(ev.startsAt)}
+              {" – "}
+              {ev.endsAt.getTime() > dayEnd ? "…" : formatTime(ev.endsAt)}
               {multiDay ? " →" : ""}
             </div>
             {/* resize handle only on the day the event actually ends */}

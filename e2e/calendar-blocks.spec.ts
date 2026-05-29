@@ -20,7 +20,7 @@ test("recurring background blocks + inline task create + end time on blocks", as
   await page.getByRole("button", { name: /create account/i }).click();
   await page.waitForURL("**/calendar", { timeout: 30_000 });
   await page.waitForLoadState("networkidle");
-  await expect(page.getByRole("button", { name: "Week", exact: true })).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByRole("button", { name: /· (fixed|rolling)/i })).toBeVisible({ timeout: 30_000 });
 
   // ── Create a recurring (daily) background block from the calendar ──
   await page.getByRole("button", { name: "Event", exact: true }).click();
@@ -65,4 +65,69 @@ test("recurring background blocks + inline task create + end time on blocks", as
   await page.goto("/tasks");
   await page.waitForLoadState("networkidle");
   await expect(page.getByText("Draft the keynote")).toBeVisible();
+});
+
+function iso(d: Date) {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+function mondayOfWeek(d: Date): Date {
+  const x = new Date(d);
+  x.setHours(0, 0, 0, 0);
+  const day = (x.getDay() + 6) % 7; // 0 = Monday
+  x.setDate(x.getDate() - day);
+  return x;
+}
+
+test("overnight recurring block shows a morning segment on the first visible day", async ({ page }) => {
+  test.setTimeout(180_000);
+  await page.emulateMedia({ colorScheme: "light" });
+
+  const email = `overnight+${Date.now()}@example.com`;
+  await page.goto("/register");
+  await page.getByLabel("Name").fill("Overnight Tester");
+  await page.getByLabel("Email").fill(email);
+  await page.getByLabel("Password").fill(PASSWORD);
+  await page.getByRole("button", { name: /create account/i }).click();
+  await page.waitForURL("**/calendar", { timeout: 30_000 });
+  await page.waitForLoadState("networkidle");
+  await expect(page.getByRole("button", { name: /· (fixed|rolling)/i })).toBeVisible({ timeout: 30_000 });
+
+  // Default view is the static week (Mon–Sun). Anchor a daily sleep block the
+  // night BEFORE Monday: Sun 10 PM → Mon 7 AM. The Monday-morning slice can
+  // only appear if expansion backs up past the range start.
+  const monday = mondayOfWeek(new Date());
+  const sundayBefore = new Date(monday);
+  sundayBefore.setDate(sundayBefore.getDate() - 1);
+
+  await page.getByRole("button", { name: "Event", exact: true }).click();
+  const dialog = page.getByRole("dialog");
+  await expect(dialog).toBeVisible();
+  await dialog.getByRole("button", { name: /background block/i }).click();
+  await dialog.getByLabel("Starts").fill(iso(sundayBefore));
+  await dialog.getByLabel("Start time").fill("22:00");
+  await dialog.getByLabel("Ends").fill(iso(monday));
+  await dialog.getByLabel("End time").fill("07:00");
+  await dialog.getByLabel("Kind").selectOption("SLEEP");
+  await dialog.getByLabel("Repeats").selectOption("daily");
+  await dialog.getByLabel("Label").fill("Sleep");
+  await dialog.getByRole("button", { name: /add block/i }).click();
+  await expect(dialog).toBeHidden();
+  await page.waitForTimeout(500);
+  await page.screenshot({ path: shot("blk-04-overnight") });
+
+  // Find a "Sleep" label in the first day column near the top of the grid
+  // (the Monday-morning continuation from Sunday night).
+  const grid = page.getByTestId("time-grid");
+  const g = (await grid.boundingBox())!;
+  const sleeps = page.getByText("Sleep", { exact: true });
+  const n = await sleeps.count();
+  let mondayMorning = false;
+  for (let i = 0; i < n; i++) {
+    const bb = await sleeps.nth(i).boundingBox();
+    if (!bb) continue;
+    const relX = (bb.x - g.x) / g.width;
+    const relY = (bb.y - g.y) / g.height;
+    if (relX < 1 / 7 && relY < 0.15) mondayMorning = true;
+  }
+  expect(mondayMorning, "expected a Sleep segment in the first column's morning").toBe(true);
 });

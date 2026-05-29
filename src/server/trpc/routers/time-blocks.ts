@@ -45,8 +45,15 @@ function expandRecurring(block: TimeBlock, rangeStart: Date, rangeEnd: Date): Oc
   }
 
   const anchorDay = startOfLocalDay(block.startsAt);
+  // Back the iteration up by the block's duration so an occurrence that STARTS
+  // before the range but spills into it (e.g. sleep 10 PM Sun → 7 AM Mon) is
+  // still generated when the range begins Monday.
+  const DAY_MS = 86_400_000;
+  const durationDays = Math.max(1, Math.ceil(durationMs / DAY_MS));
   let day = startOfLocalDay(
-    new Date(Math.max(anchorDay.getTime(), startOfLocalDay(rangeStart).getTime())),
+    new Date(
+      Math.max(anchorDay.getTime(), startOfLocalDay(rangeStart).getTime() - durationDays * DAY_MS),
+    ),
   );
   const lastDay = startOfLocalDay(rangeEnd);
   let guard = 0;

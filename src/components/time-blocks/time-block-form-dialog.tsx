@@ -17,6 +17,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { trpc } from "@/lib/trpc/client";
 import { dateToInputValue, inputValueToDate } from "@/lib/format";
+import { REPEAT_OPTIONS, repeatToRrule, rruleToRepeat, type Repeat } from "@/lib/recurrence";
 
 function toTime(d: Date) {
   return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
@@ -36,6 +37,7 @@ export type TimeBlockInit = {
   kind?: TimeBlockKind;
   label?: string | null;
   schedulableOnTop?: boolean;
+  rrule?: string | null;
 };
 
 export function TimeBlockFormDialog({
@@ -60,6 +62,7 @@ export function TimeBlockFormDialog({
   const [kind, setKind] = useState<TimeBlockKind>(TimeBlockKind.CUSTOM);
   const [label, setLabel] = useState("");
   const [schedulable, setSchedulable] = useState(false);
+  const [repeat, setRepeat] = useState<Repeat>("none");
 
   useEffect(() => {
     if (!open) return;
@@ -74,6 +77,7 @@ export function TimeBlockFormDialog({
     setKind(block?.kind ?? TimeBlockKind.CUSTOM);
     setLabel(block?.label ?? "");
     setSchedulable(block?.schedulableOnTop ?? false);
+    setRepeat(rruleToRepeat(block?.rrule));
   }, [open, block]);
 
   async function save() {
@@ -94,6 +98,7 @@ export function TimeBlockFormDialog({
         kind,
         label: label.trim() || null,
         schedulableOnTop: schedulable,
+        rrule: repeatToRrule(repeat),
       };
       if (block?.id) {
         await update.mutateAsync({ id: block.id, ...payload });
@@ -102,7 +107,7 @@ export function TimeBlockFormDialog({
         await create.mutateAsync(payload);
         toast.success("Time block created.");
       }
-      await utils.timeBlocks.list.invalidate();
+      await Promise.all([utils.timeBlocks.list.invalidate(), utils.timeBlocks.occurrences.invalidate()]);
       onOpenChange(false);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Failed to save time block.");
@@ -114,7 +119,7 @@ export function TimeBlockFormDialog({
     if (!confirm("Delete this time block?")) return;
     try {
       await del.mutateAsync({ id: block.id });
-      await utils.timeBlocks.list.invalidate();
+      await Promise.all([utils.timeBlocks.list.invalidate(), utils.timeBlocks.occurrences.invalidate()]);
       onOpenChange(false);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Failed to delete.");
@@ -179,6 +184,19 @@ export function TimeBlockFormDialog({
                   <option key={k} value={k}>
                     {k.toLowerCase().replace("_", " ")}
                   </option>
+                ))}
+              </select>
+            </div>
+            <div className="grid gap-2 sm:col-span-2">
+              <Label htmlFor="tb-repeat">Repeats</Label>
+              <select
+                id="tb-repeat"
+                value={repeat}
+                onChange={(e) => setRepeat(e.target.value as Repeat)}
+                className="h-9 rounded-md border border-input bg-transparent px-2 text-sm"
+              >
+                {REPEAT_OPTIONS.map((o) => (
+                  <option key={o.value} value={o.value}>{o.label}</option>
                 ))}
               </select>
             </div>

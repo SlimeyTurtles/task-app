@@ -21,16 +21,9 @@ import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import { trpc } from "@/lib/trpc/client";
 import { dateToInputValue, inputValueToDate } from "@/lib/format";
+import { REPEAT_OPTIONS, repeatToRrule, type Repeat } from "@/lib/recurrence";
 
 type Mode = "event" | "block";
-type Repeat = "none" | "daily" | "weekdays" | "weekly";
-
-const REPEAT_TO_RRULE: Record<Repeat, string | null> = {
-  none: null,
-  daily: "FREQ=DAILY",
-  weekdays: "FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR",
-  weekly: "FREQ=WEEKLY",
-};
 
 function toTimeInputValue(d: Date): string {
   return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
@@ -190,7 +183,7 @@ export function EventFormDialog({ state, onClose }: { state: EventDialogState; o
           endsAt: endAt,
           kind: blockKind,
           label: blockLabel.trim() || null,
-          rrule: REPEAT_TO_RRULE[repeat],
+          rrule: repeatToRrule(repeat),
           schedulableOnTop: schedulable,
         });
         toast.success(repeat === "none" ? "Background block added." : "Recurring block added.");
@@ -238,7 +231,7 @@ export function EventFormDialog({ state, onClose }: { state: EventDialogState; o
 
   return (
     <Dialog open={state.open} onOpenChange={(o) => (o ? null : onClose())}>
-      <DialogContent className="max-w-xl max-h-[88vh] overflow-y-auto gap-0 p-0">
+      <DialogContent className="max-w-2xl max-h-[88vh] overflow-y-auto gap-0 p-0">
         <DialogHeader className="px-6 pt-6 pb-4 border-b">
           <DialogTitle>{title}</DialogTitle>
         </DialogHeader>
@@ -396,10 +389,9 @@ export function EventFormDialog({ state, onClose }: { state: EventDialogState; o
                       onChange={(e) => setRepeat(e.target.value as Repeat)}
                       className="h-10 rounded-md border border-input bg-transparent px-2 text-sm"
                     >
-                      <option value="none">Does not repeat</option>
-                      <option value="daily">Every day</option>
-                      <option value="weekdays">Weekdays (Mon–Fri)</option>
-                      <option value="weekly">Weekly</option>
+                      {REPEAT_OPTIONS.map((o) => (
+                        <option key={o.value} value={o.value}>{o.label}</option>
+                      ))}
                     </select>
                   </div>
                 </div>

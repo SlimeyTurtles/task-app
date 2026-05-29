@@ -34,7 +34,9 @@ test("redesigned calendar: week default, drag-create, granularity, no scroll", a
   await page.waitForURL(/\/(today|calendar)/, { timeout: 30_000 });
   await page.goto("/calendar");
   await page.waitForLoadState("networkidle");
-  await expect(page.getByRole("button", { name: "Week", exact: true })).toBeVisible({ timeout: 30_000 });
+  // The View control trigger shows the current window, defaulting to "7 days · fixed".
+  const viewBtn = page.getByRole("button", { name: /· (fixed|rolling)/i });
+  await expect(viewBtn).toBeVisible({ timeout: 30_000 });
   await page.waitForTimeout(400);
   await page.screenshot({ path: shot("rd-01-week") });
 
@@ -91,22 +93,36 @@ test("redesigned calendar: week default, drag-create, granularity, no scroll", a
   await expect(page.getByText("Untitled")).not.toHaveCount(1);
   await page.screenshot({ path: shot("rd-03b-multiday") });
 
-  // Switch to Day view.
+  // Switch to Day view via the View control popover preset.
+  await viewBtn.click();
   await page.getByRole("button", { name: "Day", exact: true }).click();
+  await page.keyboard.press("Escape");
   await page.waitForTimeout(300);
   await page.screenshot({ path: shot("rd-04-day") });
 
+  // Switch to a rolling 3-day window and confirm the label reflects it.
+  await page.getByRole("button", { name: /· (fixed|rolling)/i }).click();
+  await page.getByRole("button", { name: "rolling", exact: true }).click();
+  await page.getByRole("button", { name: "3 days", exact: true }).click();
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("button", { name: /3 days · rolling/i })).toBeVisible();
+  await page.screenshot({ path: shot("rd-04b-rolling-3day") });
+
   // Switch to Month box view.
+  await page.getByRole("button", { name: /· (fixed|rolling)/i }).click();
   await page.getByRole("button", { name: "Month", exact: true }).click();
+  await page.keyboard.press("Escape");
   await page.waitForTimeout(400);
   await page.screenshot({ path: shot("rd-05-month") });
   // Month grid still fits the viewport.
   const scrollable2 = await page.evaluate(() => document.documentElement.scrollHeight > window.innerHeight + 2);
   expect(scrollable2).toBe(false);
 
-  // Dark mode week view.
+  // Back to a week, dark mode.
   await page.emulateMedia({ colorScheme: "dark" });
+  await page.getByRole("button", { name: /· (fixed|rolling)/i }).click();
   await page.getByRole("button", { name: "Week", exact: true }).click();
+  await page.keyboard.press("Escape");
   await page.waitForTimeout(400);
   await page.screenshot({ path: shot("rd-06-week-dark") });
 

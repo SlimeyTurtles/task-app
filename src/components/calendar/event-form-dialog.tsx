@@ -295,7 +295,7 @@ export function EventFormDialog({ state, onClose }: { state: EventDialogState; o
 
   return (
     <Dialog open={state.open} onOpenChange={(o) => (o ? null : onClose())}>
-      <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto gap-0 p-0">
+      <DialogContent className="sm:max-w-3xl max-h-[90vh] overflow-y-auto gap-0 p-0">
         <DialogHeader className="px-6 pt-6 pb-4 border-b">
           <DialogTitle>{title}</DialogTitle>
         </DialogHeader>

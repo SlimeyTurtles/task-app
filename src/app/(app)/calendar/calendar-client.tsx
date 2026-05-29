@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { ChevronLeft, ChevronRight, Plus, Sparkles } from "lucide-react";
 import { toast } from "sonner";
 
@@ -27,8 +27,12 @@ export function CalendarClient() {
   const [planOpen, setPlanOpen] = useState(false);
 
   // Persist {view, hourHeight} to localStorage so navigating away and back
-  // remembers the configuration. Read deferred to avoid hydration mismatch.
-  const persisted = useRef(false);
+  // remembers the configuration. Read deferred to avoid hydration mismatch;
+  // `hydrated` is a state (not a ref) so the write effect only fires AFTER the
+  // read's setStates have been applied — otherwise the write effect runs in
+  // the same commit as the read and overwrites localStorage with the still-
+  // default values before the saved ones land.
+  const [hydrated, setHydrated] = useState(false);
   useEffect(() => {
     try {
       const raw = localStorage.getItem("calendarView");
@@ -40,16 +44,16 @@ export function CalendarClient() {
     } catch {
       // ignore malformed storage
     }
-    persisted.current = true;
+    setHydrated(true);
   }, []);
   useEffect(() => {
-    if (!persisted.current) return;
+    if (!hydrated) return;
     try {
       localStorage.setItem("calendarView", JSON.stringify({ view, hourHeight }));
     } catch {
       // storage may be unavailable
     }
-  }, [view, hourHeight]);
+  }, [view, hourHeight, hydrated]);
 
   function setView(v: CalendarView) {
     setViewState(v);

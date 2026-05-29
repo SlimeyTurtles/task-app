@@ -111,14 +111,18 @@ test("calendar view + hour height persist across navigation", async ({ page }) =
   await page.keyboard.press("Escape");
   await expect(page.getByRole("button", { name: /3 days · rolling/i })).toBeVisible();
 
-  // Navigate away and back.
-  await page.goto("/tasks");
-  await page.waitForLoadState("networkidle");
-  await page.goto("/calendar");
-  await page.waitForLoadState("networkidle");
+  // Navigate away and back — twice, to exercise the mount read+write race
+  // (the bug was the write effect overwriting localStorage with the still-
+  // default state before the read's setStates landed).
+  for (let i = 0; i < 2; i++) {
+    await page.goto("/tasks");
+    await page.waitForLoadState("networkidle");
+    await page.goto("/calendar");
+    await page.waitForLoadState("networkidle");
 
-  // View and hour height should be restored.
-  await expect(page.getByRole("button", { name: /3 days · rolling/i })).toBeVisible();
-  await page.getByRole("button", { name: /3 days · rolling/i }).click();
-  await expect(page.getByText("96px")).toBeVisible();
+    await expect(page.getByRole("button", { name: /3 days · rolling/i })).toBeVisible();
+    await page.getByRole("button", { name: /3 days · rolling/i }).click();
+    await expect(page.getByText("96px")).toBeVisible();
+    await page.keyboard.press("Escape");
+  }
 });

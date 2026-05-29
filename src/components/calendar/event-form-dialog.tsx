@@ -24,6 +24,7 @@ import { dateToInputValue, inputValueToDate } from "@/lib/format";
 import { REPEAT_OPTIONS, repeatToRrule, type Repeat } from "@/lib/recurrence";
 
 type Mode = "event" | "block";
+type WhenMode = "manual" | "auto";
 
 function toTimeInputValue(d: Date): string {
   return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
@@ -47,6 +48,11 @@ function durationLabel(start: Date | null, end: Date | null): string {
   if (m) parts.push(`${m}m`);
   return parts.join(" ") || "0m";
 }
+function toIntOrNull(v: string): number | null {
+  if (!v.trim()) return null;
+  const n = parseInt(v, 10);
+  return Number.isFinite(n) ? n : null;
+}
 
 export type EventDialogState = {
   open: boolean;
@@ -60,29 +66,28 @@ export type EventDialogState = {
   };
 };
 
-function Section({ title, hint, children }: { title: string; hint?: string; children: React.ReactNode }) {
+function SectionHeader({ title, hint }: { title: string; hint?: string }) {
   return (
-    <section className="grid gap-3">
-      <div className="flex items-baseline justify-between">
-        <h3 className="text-xs font-medium uppercase tracking-wider text-muted-foreground">{title}</h3>
-        {hint ? <span className="text-xs text-muted-foreground">{hint}</span> : null}
-      </div>
-      {children}
-    </section>
+    <div className="flex items-baseline justify-between mb-2">
+      <h3 className="text-xs font-medium uppercase tracking-wider text-muted-foreground">{title}</h3>
+      {hint ? <span className="text-xs text-muted-foreground">{hint}</span> : null}
+    </div>
   );
 }
 
 export function EventFormDialog({ state, onClose }: { state: EventDialogState; onClose: () => void }) {
   const utils = trpc.useUtils();
   const { data: tasks } = trpc.tasks.list.useQuery({});
-  const { data: existing } = trpc.events.get.useQuery(
+  const { data: existing, isLoading: existingLoading } = trpc.events.get.useQuery(
     { id: state.eventId ?? "" },
     { enabled: Boolean(state.eventId) },
   );
 
   const editing = Boolean(state.eventId);
   const [mode, setMode] = useState<Mode>("event");
+  const [whenMode, setWhenMode] = useState<WhenMode>("manual");
 
+  const [eventTitle, setEventTitle] = useState("");
   const [startDate, setStartDate] = useState("");
   const [startTime, setStartTime] = useState("09:00");
   const [endDate, setEndDate] = useState("");
@@ -91,6 +96,11 @@ export function EventFormDialog({ state, onClose }: { state: EventDialogState; o
   const [notes, setNotes] = useState("");
   const [taskIds, setTaskIds] = useState<string[]>([]);
   const [taskFilter, setTaskFilter] = useState("");
+
+  // auto-mode metrics
+  const [estimateMin, setEstimateMin] = useState("");
+  const [stressVal, setStressVal] = useState("");
+  const [exhVal, setExhVal] = useState("");
 
   // block-only
   const [blockKind, setBlockKind] = useState<TimeBlockKind>(TimeBlockKind.SLEEP);
@@ -102,6 +112,8 @@ export function EventFormDialog({ state, onClose }: { state: EventDialogState; o
     if (!state.open) return;
     if (state.eventId && existing) {
       setMode("event");
+      setWhenMode("manual");
+      setEventTitle(existing.title ?? "");
       setStartDate(dateToInputValue(existing.startsAt));
       setStartTime(toTimeInputValue(existing.startsAt));
       setEndDate(dateToInputValue(existing.endsAt));
@@ -112,6 +124,8 @@ export function EventFormDialog({ state, onClose }: { state: EventDialogState; o
       setTaskFilter("");
     } else if (state.init) {
       setMode(state.init.kind === EventKind.BACKGROUND ? "block" : "event");
+      setWhenMode("manual");
+      setEventTitle("");
       setStartDate(dateToInputValue(state.init.startsAt));
       setStartTime(toTimeInputValue(state.init.startsAt));
       setEndDate(dateToInputValue(state.init.endsAt));
@@ -120,6 +134,9 @@ export function EventFormDialog({ state, onClose }: { state: EventDialogState; o
       setNotes("");
       setTaskIds(state.init.taskIds ?? []);
       setTaskFilter("");
+      setEstimateMin("");
+      setStressVal("");
+      setExhVal("");
       setBlockKind(TimeBlockKind.SLEEP);
       setBlockLabel("");
       setRepeat("none");
@@ -132,8 +149,17 @@ export function EventFormDialog({ state, onClose }: { state: EventDialogState; o
   const delEvent = trpc.events.delete.useMutation();
   const createBlock = trpc.timeBlocks.create.useMutation();
   const quickCapture = trpc.tasks.quickCapture.useMutation();
+  const quickAdd = trpc.events.quickAdd.useMutation();
   const pending =
-    createEvent.isPending || updateEvent.isPending || createBlock.isPending || quickCapture.isPending;
+    createEvent.isPending ||
+    updateEvent.isPending ||
+    createBlock.isPending ||
+    quickCapture.isPending ||
+    quickAdd.isPending;
+
+  // When editing, wait for existing to load before allowing save (prevents the
+  // race where empty taskIds would wipe the event's attributions).
+  const saveDisabled = pending || (editing && existingLoading);
 
   const startAt = combine(startDate, startTime);
   const endAt = combine(endDate, endTime);
@@ -168,16 +194,17 @@ export function EventFormDialog({ state, onClose }: { state: EventDialogState; o
   }
 
   async function onSave() {
-    if (!startAt || !endAt) {
-      toast.error("Pick a valid start and end.");
-      return;
-    }
-    if (endAt <= startAt) {
-      toast.error("End must be after start.");
-      return;
-    }
     try {
+      // ── Background block ──
       if (mode === "block") {
+        if (!startAt || !endAt) {
+          toast.error("Pick a valid start and end.");
+          return;
+        }
+        if (endAt <= startAt) {
+          toast.error("End must be after start.");
+          return;
+        }
         await createBlock.mutateAsync({
           startsAt: startAt,
           endsAt: endAt,
@@ -193,7 +220,38 @@ export function EventFormDialog({ state, onClose }: { state: EventDialogState; o
         return;
       }
 
+      // ── Event: find a spot (auto-schedule) ──
+      if (whenMode === "auto" && !editing) {
+        const title = eventTitle.trim();
+        if (!title) {
+          toast.error("Add a name first.");
+          return;
+        }
+        await quickAdd.mutateAsync({
+          title,
+          description: notes.trim() || null,
+          estimatedMinutes: toIntOrNull(estimateMin),
+          stress: toIntOrNull(stressVal),
+          exhaustion: toIntOrNull(exhVal),
+          attachTaskId: taskIds[0] ?? null,
+        });
+        toast.success("Scheduled — drag it to adjust.");
+        await Promise.all([utils.events.list.invalidate(), utils.tasks.list.invalidate()]);
+        onClose();
+        return;
+      }
+
+      // ── Event: manual time ──
+      if (!startAt || !endAt) {
+        toast.error("Pick a valid start and end.");
+        return;
+      }
+      if (endAt <= startAt) {
+        toast.error("End must be after start.");
+        return;
+      }
       const payload = {
+        title: eventTitle.trim() || null,
         startsAt: startAt,
         endsAt: endAt,
         notes: notes.trim() || null,
@@ -227,17 +285,23 @@ export function EventFormDialog({ state, onClose }: { state: EventDialogState; o
     }
   }
 
-  const title = editing ? "Edit event" : mode === "block" ? "New background block" : "New event";
+  const title = editing
+    ? "Edit event"
+    : mode === "block"
+    ? "New background block"
+    : whenMode === "auto"
+    ? "Quick-add event"
+    : "New event";
 
   return (
     <Dialog open={state.open} onOpenChange={(o) => (o ? null : onClose())}>
-      <DialogContent className="max-w-2xl max-h-[88vh] overflow-y-auto gap-0 p-0">
+      <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto gap-0 p-0">
         <DialogHeader className="px-6 pt-6 pb-4 border-b">
           <DialogTitle>{title}</DialogTitle>
         </DialogHeader>
 
-        <div className="px-6 py-5 grid gap-6">
-          {/* Type toggle — only when creating */}
+        <div className="px-6 py-5 grid gap-5">
+          {/* Type toggle (event vs block) — create only */}
           {!editing ? (
             <div className="inline-flex rounded-lg border p-0.5 w-full">
               {([
@@ -259,75 +323,176 @@ export function EventFormDialog({ state, onClose }: { state: EventDialogState; o
             </div>
           ) : null}
 
-          {/* When */}
-          <Section title="When" hint={dur ? `${dur}${startDate !== endDate ? " · spans days" : ""}` : undefined}>
-            <div className="grid gap-3">
-              <div className="grid grid-cols-[1fr_auto] gap-2 items-end">
-                <div className="grid gap-1.5">
-                  <Label htmlFor="ev-start-date" className="text-xs text-muted-foreground">Starts</Label>
-                  <Input id="ev-start-date" type="date" className="h-10" value={startDate} onChange={(e) => setStartDate(e.target.value)} />
-                </div>
-                <Input aria-label="Start time" type="time" className="h-10 w-32" value={startTime} onChange={(e) => setStartTime(e.target.value)} />
-              </div>
-              <div className="grid grid-cols-[1fr_auto] gap-2 items-end">
-                <div className="grid gap-1.5">
-                  <Label htmlFor="ev-end-date" className="text-xs text-muted-foreground">Ends</Label>
-                  <Input id="ev-end-date" type="date" className="h-10" value={endDate} onChange={(e) => setEndDate(e.target.value)} />
-                </div>
-                <Input aria-label="End time" type="time" className="h-10 w-32" value={endTime} onChange={(e) => setEndTime(e.target.value)} />
-              </div>
-            </div>
-          </Section>
-
           {mode === "event" ? (
             <>
-              {/* Tasks */}
-              <Section
-                title="Tasks"
-                hint={taskIds.length > 1 ? "parallel — ratio unknown" : taskIds.length === 1 ? "1 attributed" : undefined}
-              >
-                {taskIds.length > 0 ? (
-                  <div className="flex flex-wrap gap-1.5">
-                    {taskIds.map((id) => (
-                      <Badge key={id} variant="secondary" className="gap-1 py-1 pl-2.5">
-                        {tasksById.get(id)?.name ?? id}
-                        <button type="button" className="text-muted-foreground hover:text-foreground" onClick={() => toggleTask(id)} aria-label="Remove task">
-                          <X className="size-3" />
-                        </button>
-                      </Badge>
-                    ))}
-                  </div>
-                ) : null}
-                <div className="relative">
-                  <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
-                  <Input
-                    placeholder="Search or type a new task…"
-                    className="h-10 pl-8"
-                    value={taskFilter}
-                    onChange={(e) => setTaskFilter(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter" && taskFilter.trim() && !exactMatch) {
-                        e.preventDefault();
-                        void createAndAttach();
-                      }
-                    }}
-                  />
+              {/* Title (full width) */}
+              <div className="grid gap-1.5">
+                <Label htmlFor="ev-title" className="text-xs text-muted-foreground">
+                  Name
+                </Label>
+                <Input
+                  id="ev-title"
+                  className="h-10"
+                  placeholder="What is this? e.g. Dentist, Draft proposal…"
+                  value={eventTitle}
+                  onChange={(e) => setEventTitle(e.target.value)}
+                  autoFocus
+                />
+              </div>
+
+              <div className="grid md:grid-cols-2 gap-6">
+                {/* LEFT COLUMN */}
+                <div className="grid gap-5">
+                  {/* When (with manual / auto toggle) */}
+                  <section>
+                    <SectionHeader
+                      title="When"
+                      hint={whenMode === "manual" && dur ? `${dur}${startDate !== endDate ? " · spans days" : ""}` : undefined}
+                    />
+                    {!editing ? (
+                      <div className="inline-flex rounded-lg border p-0.5 w-full mb-3">
+                        {([
+                          { v: "manual", label: "Pick a time" },
+                          { v: "auto", label: "Find a spot for me" },
+                        ] as const).map((opt) => (
+                          <button
+                            key={opt.v}
+                            type="button"
+                            onClick={() => setWhenMode(opt.v)}
+                            className={cn(
+                              "flex-1 px-2.5 py-1 text-xs rounded-md transition-colors",
+                              whenMode === opt.v ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground",
+                            )}
+                          >
+                            {opt.label}
+                          </button>
+                        ))}
+                      </div>
+                    ) : null}
+
+                    {whenMode === "manual" || editing ? (
+                      <div className="grid gap-3">
+                        <div className="grid grid-cols-[1fr_auto] gap-2 items-end">
+                          <div className="grid gap-1.5">
+                            <Label htmlFor="ev-start-date" className="text-xs text-muted-foreground">Starts</Label>
+                            <Input id="ev-start-date" type="date" className="h-10" value={startDate} onChange={(e) => setStartDate(e.target.value)} />
+                          </div>
+                          <Input aria-label="Start time" type="time" className="h-10 w-32" value={startTime} onChange={(e) => setStartTime(e.target.value)} />
+                        </div>
+                        <div className="grid grid-cols-[1fr_auto] gap-2 items-end">
+                          <div className="grid gap-1.5">
+                            <Label htmlFor="ev-end-date" className="text-xs text-muted-foreground">Ends</Label>
+                            <Input id="ev-end-date" type="date" className="h-10" value={endDate} onChange={(e) => setEndDate(e.target.value)} />
+                          </div>
+                          <Input aria-label="End time" type="time" className="h-10 w-32" value={endTime} onChange={(e) => setEndTime(e.target.value)} />
+                        </div>
+                      </div>
+                    ) : (
+                      <p className="text-xs text-muted-foreground">
+                        We&apos;ll place it at the next free slot in your working hours. Drag the block on the calendar to adjust.
+                      </p>
+                    )}
+                  </section>
+
+                  {/* Metrics (auto only) — task estimate + difficulty */}
+                  {whenMode === "auto" && !editing ? (
+                    <section>
+                      <SectionHeader title="How long & how hard" hint="optional" />
+                      <div className="grid grid-cols-3 gap-3">
+                        <div className="grid gap-1.5">
+                          <Label htmlFor="ev-est" className="text-xs text-muted-foreground">Minutes</Label>
+                          <Input id="ev-est" type="number" inputMode="numeric" min={5} className="h-10" placeholder="60" value={estimateMin} onChange={(e) => setEstimateMin(e.target.value)} />
+                        </div>
+                        <div className="grid gap-1.5">
+                          <Label htmlFor="ev-stress" className="text-xs text-muted-foreground">Stress (0–10)</Label>
+                          <Input id="ev-stress" type="number" inputMode="numeric" min={0} max={10} className="h-10" value={stressVal} onChange={(e) => setStressVal(e.target.value)} />
+                        </div>
+                        <div className="grid gap-1.5">
+                          <Label htmlFor="ev-exh" className="text-xs text-muted-foreground">Exhaust (0–10)</Label>
+                          <Input id="ev-exh" type="number" inputMode="numeric" min={0} max={10} className="h-10" value={exhVal} onChange={(e) => setExhVal(e.target.value)} />
+                        </div>
+                      </div>
+                    </section>
+                  ) : null}
+
+                  {/* Notes + lazy */}
+                  <section>
+                    <SectionHeader title="About" />
+                    <Textarea
+                      rows={3}
+                      placeholder="What is this about?"
+                      value={notes}
+                      onChange={(e) => setNotes(e.target.value)}
+                    />
+                    {whenMode === "manual" || editing ? (
+                      <label className="mt-3 flex items-start justify-between gap-4 rounded-lg border px-3 py-2 cursor-pointer">
+                        <span>
+                          <span className="text-sm font-medium block">Lazy log</span>
+                          <span className="text-xs text-muted-foreground">
+                            Lowers confidence — for when the exact window isn&apos;t trustworthy.
+                          </span>
+                        </span>
+                        <Switch checked={lazy} onCheckedChange={(v) => setLazy(Boolean(v))} />
+                      </label>
+                    ) : null}
+                  </section>
                 </div>
-                {taskFilter.trim() && !exactMatch ? (
-                  <Button type="button" variant="outline" size="sm" className="justify-start" onClick={createAndAttach}>
-                    <Plus className="size-4" /> Create task “{taskFilter.trim()}” &amp; attach
-                  </Button>
-                ) : null}
-                {taskFilter.trim() || taskIds.length === 0 ? (
-                  <div className="max-h-40 overflow-y-auto rounded-lg border divide-y">
-                    {filteredTasks.slice(0, 40).map((t) => {
+
+                {/* RIGHT COLUMN — Tasks (optional attribution) */}
+                <div className="grid gap-3">
+                  <SectionHeader
+                    title="Tasks"
+                    hint={taskIds.length > 1 ? "parallel" : taskIds.length === 1 ? "1 attached" : "optional"}
+                  />
+                  {taskIds.length > 0 ? (
+                    <div className="flex flex-wrap gap-1.5">
+                      {taskIds.map((id) => (
+                        <Badge key={id} variant="secondary" className="gap-1 py-1 pl-2.5">
+                          {tasksById.get(id)?.name ?? id}
+                          <button
+                            type="button"
+                            className="text-muted-foreground hover:text-foreground"
+                            onClick={() => toggleTask(id)}
+                            aria-label="Remove task"
+                          >
+                            <X className="size-3" />
+                          </button>
+                        </Badge>
+                      ))}
+                    </div>
+                  ) : null}
+                  <div className="relative">
+                    <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
+                    <Input
+                      placeholder="Search or type a new task…"
+                      className="h-10 pl-8"
+                      value={taskFilter}
+                      onChange={(e) => setTaskFilter(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" && taskFilter.trim() && !exactMatch) {
+                          e.preventDefault();
+                          void createAndAttach();
+                        }
+                      }}
+                    />
+                  </div>
+                  {taskFilter.trim() && !exactMatch ? (
+                    <Button type="button" variant="outline" size="sm" className="justify-start" onClick={createAndAttach}>
+                      <Plus className="size-4" /> Create task “{taskFilter.trim()}” &amp; attach
+                    </Button>
+                  ) : null}
+                  <div className="rounded-lg border divide-y max-h-72 overflow-y-auto">
+                    {filteredTasks.slice(0, 60).map((t) => {
                       const on = taskIds.includes(t.id);
                       return (
                         <button
                           key={t.id}
                           type="button"
                           onClick={() => toggleTask(t.id)}
-                          className={cn("w-full text-left px-3 py-2 text-sm flex items-center gap-2 hover:bg-accent/40", on && "bg-accent/40")}
+                          className={cn(
+                            "w-full text-left px-3 py-2 text-sm flex items-center gap-2 hover:bg-accent/40",
+                            on && "bg-accent/40",
+                          )}
                         >
                           <span className={cn("size-4 rounded border flex items-center justify-center shrink-0", on ? "bg-primary border-primary text-primary-foreground" : "border-input")}>
                             {on ? <Check className="size-3" /> : null}
@@ -338,81 +503,75 @@ export function EventFormDialog({ state, onClose }: { state: EventDialogState; o
                       );
                     })}
                     {filteredTasks.length === 0 ? (
-                      <p className="px-3 py-3 text-sm text-muted-foreground">No matching tasks — press Enter to create one.</p>
+                      <p className="px-3 py-3 text-sm text-muted-foreground">
+                        {taskFilter.trim() ? "No match — press Enter to create." : "No tasks yet — type a name above."}
+                      </p>
                     ) : null}
                   </div>
-                ) : null}
-              </Section>
-
-              {/* Details */}
-              <Section title="Details">
-                <div className="grid gap-4">
-                  <label className="flex items-start justify-between gap-4 rounded-lg border px-3 py-2.5 cursor-pointer">
-                    <span>
-                      <span className="text-sm font-medium block">Lazy log</span>
-                      <span className="text-xs text-muted-foreground">
-                        Record that it happened without trusting the exact window — lowers confidence.
-                      </span>
-                    </span>
-                    <Switch checked={lazy} onCheckedChange={(v) => setLazy(Boolean(v))} />
-                  </label>
-                  <div className="grid gap-1.5">
-                    <Label htmlFor="ev-notes" className="text-xs text-muted-foreground">Notes</Label>
-                    <Textarea id="ev-notes" rows={2} value={notes} onChange={(e) => setNotes(e.target.value)} />
-                  </div>
                 </div>
-              </Section>
+              </div>
             </>
           ) : (
-            /* Background block */
-            <Section title="Block">
-              <div className="grid gap-4">
-                <div className="grid sm:grid-cols-2 gap-3">
-                  <div className="grid gap-1.5">
-                    <Label htmlFor="blk-kind" className="text-xs text-muted-foreground">Kind</Label>
-                    <select
-                      id="blk-kind"
-                      value={blockKind}
-                      onChange={(e) => setBlockKind(e.target.value as TimeBlockKind)}
-                      className="h-10 rounded-md border border-input bg-transparent px-2 text-sm"
-                    >
-                      {Object.values(TimeBlockKind).map((k) => (
-                        <option key={k} value={k}>{k.toLowerCase().replace("_", " ")}</option>
-                      ))}
-                    </select>
-                  </div>
-                  <div className="grid gap-1.5">
-                    <Label htmlFor="blk-repeat" className="text-xs text-muted-foreground">Repeats</Label>
-                    <select
-                      id="blk-repeat"
-                      value={repeat}
-                      onChange={(e) => setRepeat(e.target.value as Repeat)}
-                      className="h-10 rounded-md border border-input bg-transparent px-2 text-sm"
-                    >
-                      {REPEAT_OPTIONS.map((o) => (
-                        <option key={o.value} value={o.value}>{o.label}</option>
-                      ))}
-                    </select>
-                  </div>
+            /* Background block — single column inside the wider dialog */
+            <section className="grid gap-4">
+              <div className="grid sm:grid-cols-2 gap-3">
+                <div className="grid gap-1.5">
+                  <Label htmlFor="blk-kind" className="text-xs text-muted-foreground">Kind</Label>
+                  <select
+                    id="blk-kind"
+                    value={blockKind}
+                    onChange={(e) => setBlockKind(e.target.value as TimeBlockKind)}
+                    className="h-10 rounded-md border border-input bg-transparent px-2 text-sm"
+                  >
+                    {Object.values(TimeBlockKind).map((k) => (
+                      <option key={k} value={k}>{k.toLowerCase().replace("_", " ")}</option>
+                    ))}
+                  </select>
                 </div>
                 <div className="grid gap-1.5">
-                  <Label htmlFor="blk-label" className="text-xs text-muted-foreground">Label</Label>
-                  <Input id="blk-label" placeholder="e.g. Sleep, Work hours, Commute" className="h-10" value={blockLabel} onChange={(e) => setBlockLabel(e.target.value)} />
+                  <Label htmlFor="blk-repeat" className="text-xs text-muted-foreground">Repeats</Label>
+                  <select
+                    id="blk-repeat"
+                    value={repeat}
+                    onChange={(e) => setRepeat(e.target.value as Repeat)}
+                    className="h-10 rounded-md border border-input bg-transparent px-2 text-sm"
+                  >
+                    {REPEAT_OPTIONS.map((o) => (
+                      <option key={o.value} value={o.value}>{o.label}</option>
+                    ))}
+                  </select>
                 </div>
-                <label className="flex items-start justify-between gap-4 rounded-lg border px-3 py-2.5 cursor-pointer">
-                  <span>
-                    <span className="text-sm font-medium block">Schedulable on top</span>
-                    <span className="text-xs text-muted-foreground">
-                      Let the planner still place tasks during this block (otherwise it's treated as busy).
-                    </span>
-                  </span>
-                  <Switch checked={schedulable} onCheckedChange={(v) => setSchedulable(Boolean(v))} />
-                </label>
-                <p className="text-xs text-muted-foreground">
-                  Background blocks are part of your routine, not tasks — so there&apos;s no task to attach.
-                </p>
               </div>
-            </Section>
+              <div className="grid sm:grid-cols-2 gap-3">
+                <div className="grid grid-cols-[1fr_auto] gap-2 items-end">
+                  <div className="grid gap-1.5">
+                    <Label htmlFor="blk-start-date" className="text-xs text-muted-foreground">Starts</Label>
+                    <Input id="blk-start-date" type="date" className="h-10" value={startDate} onChange={(e) => setStartDate(e.target.value)} />
+                  </div>
+                  <Input aria-label="Start time" type="time" className="h-10 w-28" value={startTime} onChange={(e) => setStartTime(e.target.value)} />
+                </div>
+                <div className="grid grid-cols-[1fr_auto] gap-2 items-end">
+                  <div className="grid gap-1.5">
+                    <Label htmlFor="blk-end-date" className="text-xs text-muted-foreground">Ends</Label>
+                    <Input id="blk-end-date" type="date" className="h-10" value={endDate} onChange={(e) => setEndDate(e.target.value)} />
+                  </div>
+                  <Input aria-label="End time" type="time" className="h-10 w-28" value={endTime} onChange={(e) => setEndTime(e.target.value)} />
+                </div>
+              </div>
+              <div className="grid gap-1.5">
+                <Label htmlFor="blk-label" className="text-xs text-muted-foreground">Label</Label>
+                <Input id="blk-label" placeholder="e.g. Sleep, Work hours, Commute" className="h-10" value={blockLabel} onChange={(e) => setBlockLabel(e.target.value)} />
+              </div>
+              <label className="flex items-start justify-between gap-4 rounded-lg border px-3 py-2.5 cursor-pointer">
+                <span>
+                  <span className="text-sm font-medium block">Schedulable on top</span>
+                  <span className="text-xs text-muted-foreground">
+                    Let the planner still place tasks during this block.
+                  </span>
+                </span>
+                <Switch checked={schedulable} onCheckedChange={(v) => setSchedulable(Boolean(v))} />
+              </label>
+            </section>
           )}
         </div>
 
@@ -426,8 +585,14 @@ export function EventFormDialog({ state, onClose }: { state: EventDialogState; o
           </div>
           <div className="flex gap-2">
             <Button variant="ghost" onClick={onClose}>Cancel</Button>
-            <Button onClick={onSave} disabled={pending}>
-              {editing ? "Save changes" : mode === "block" ? "Add block" : "Log event"}
+            <Button onClick={onSave} disabled={saveDisabled}>
+              {editing
+                ? "Save changes"
+                : mode === "block"
+                ? "Add block"
+                : whenMode === "auto"
+                ? "Find a spot & add"
+                : "Log event"}
             </Button>
           </div>
         </DialogFooter>

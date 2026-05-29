@@ -4,7 +4,7 @@ import { EventKind } from "@prisma/client";
 
 import { cn } from "@/lib/utils";
 import { addDays, isSameDay, startOfLocalDay, startOfWeek, formatTime } from "@/lib/scheduling";
-import type { GridEvent } from "./time-grid";
+import { eventLabel, type GridEvent } from "./time-grid";
 
 /**
  * Calendar "box" view for ranges wider than a week. Renders full weeks
@@ -110,12 +110,7 @@ function MonthCell({
       {dayEvents.slice(0, MAX).map((ev) => {
         const task = ev.attributions[0]?.task;
         const color = task?.area?.color ?? "var(--primary)";
-        const label =
-          ev.attributions.length === 0
-            ? "Untitled"
-            : ev.attributions.length === 1
-            ? task?.name ?? "Event"
-            : `${ev.attributions.length} parallel`;
+        const label = eventLabel(ev);
         return (
           <span
             key={ev.id}

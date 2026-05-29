@@ -337,6 +337,7 @@ enum EventSource {
 model Event {
   id         String      @id @default(cuid())
   userId     String
+  title      String? // free-text label for a standalone (non-task) event, e.g. "Dentist"
   startsAt   DateTime
   endsAt     DateTime
   notes      String?

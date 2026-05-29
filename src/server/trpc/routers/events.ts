@@ -1,8 +1,9 @@
 import { TRPCError } from "@trpc/server";
-import { EventKind, EventSource, type Prisma } from "@prisma/client";
+import { EventKind, EventSource, TaskStatus, type Prisma } from "@prisma/client";
 import { z } from "zod";
 
 import { protectedProcedure, router } from "../init";
+import { addDays, startOfLocalDay } from "@/lib/scheduling";
 
 const AttributionInput = z.object({
   taskId: z.string(),
@@ -11,6 +12,7 @@ const AttributionInput = z.object({
 });
 
 const EventInput = z.object({
+  title: z.string().trim().max(300).nullish(),
   startsAt: z.date(),
   endsAt: z.date(),
   notes: z.string().max(5000).nullish(),
@@ -19,6 +21,22 @@ const EventInput = z.object({
   /** When true (or wide-window heuristic kicks in), confidence drops to 0.3 — see design doc §4.1 "lazy log". */
   lazy: z.boolean().default(false),
   attributions: z.array(AttributionInput).default([]),
+});
+
+// Update uses explicit optionals with NO defaults: an omitted field must stay
+// `undefined` (= "leave unchanged"). A `.default()` here would silently turn a
+// move (which sends only times) into "clear attributions / reset kind" — that
+// was the move-detaches-the-task bug.
+const EventUpdateInput = z.object({
+  id: z.string(),
+  title: z.string().trim().max(300).nullish(),
+  startsAt: z.date().optional(),
+  endsAt: z.date().optional(),
+  notes: z.string().max(5000).nullish(),
+  kind: z.nativeEnum(EventKind).optional(),
+  source: z.nativeEnum(EventSource).optional(),
+  lazy: z.boolean().optional(),
+  attributions: z.array(AttributionInput).optional(),
 });
 
 const Range = z.object({
@@ -78,6 +96,7 @@ export const eventsRouter = router({
     return ctx.db.event.create({
       data: {
         userId: ctx.session.user.id,
+        title: input.title ?? null,
         startsAt: input.startsAt,
         endsAt: input.endsAt,
         notes: input.notes ?? null,
@@ -98,12 +117,12 @@ export const eventsRouter = router({
   }),
 
   update: protectedProcedure
-    .input(EventInput.partial().extend({ id: z.string() }))
+    .input(EventUpdateInput)
     .mutation(async ({ ctx, input }) => {
       const { id, attributions, lazy, ...rest } = input;
       const owned = await ctx.db.event.findFirst({
         where: { id, userId: ctx.session.user.id },
-        select: { id: true, startsAt: true, endsAt: true },
+        select: { id: true, startsAt: true, endsAt: true, confidence: true },
       });
       if (!owned) throw new TRPCError({ code: "NOT_FOUND" });
 
@@ -118,13 +137,17 @@ export const eventsRouter = router({
       }
 
       const data: Prisma.EventUpdateInput = { ...rest };
+      // Recompute confidence only when lazy or the times changed; preserve the
+      // event's existing laziness across a plain move/resize.
       if (lazy !== undefined || rest.startsAt || rest.endsAt) {
-        data.confidence = computeConfidence(lazy ?? false, startsAt, endsAt);
+        const effectiveLazy = lazy ?? owned.confidence < 1;
+        data.confidence = computeConfidence(effectiveLazy, startsAt, endsAt);
       }
 
       return ctx.db.$transaction(async (tx) => {
         const updated = await tx.event.update({ where: { id }, data });
-        if (attributions) {
+        // Only touch attributions when the caller explicitly passed them.
+        if (attributions !== undefined) {
           await tx.eventTaskAttribution.deleteMany({ where: { eventId: id } });
           if (attributions.length) {
             const ratioUnknownDefault = attributions.length > 1;
@@ -225,7 +248,108 @@ export const eventsRouter = router({
         },
       });
     }),
+
+  /**
+   * Quick capture → auto-schedule. Creates a task from the supplied
+   * name / about / estimate / difficulty (or uses an existing task), finds
+   * the next free slot in working hours, and drops a scheduled event there.
+   * No time needs to be chosen by the user — they can drag it afterwards.
+   */
+  quickAdd: protectedProcedure
+    .input(
+      z.object({
+        title: z.string().trim().min(1).max(300),
+        description: z.string().trim().max(10_000).nullish(),
+        estimatedMinutes: z.number().int().min(5).max(12 * 60).nullish(),
+        stress: z.number().int().min(0).max(10).nullish(),
+        exhaustion: z.number().int().min(0).max(10).nullish(),
+        attachTaskId: z.string().nullish(),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      const userId = ctx.session.user.id;
+      const durationMin = Math.min(12 * 60, Math.max(15, input.estimatedMinutes ?? 60));
+
+      let taskId = input.attachTaskId ?? null;
+      if (taskId) {
+        await assertTasksOwned(ctx, [taskId]);
+      } else {
+        const task = await ctx.db.task.create({
+          data: {
+            userId,
+            name: input.title,
+            description: input.description ?? null,
+            estimatedMinutes: input.estimatedMinutes ?? null,
+            stress: input.stress ?? null,
+            exhaustion: input.exhaustion ?? null,
+            status: TaskStatus.SCHEDULED,
+          },
+        });
+        taskId = task.id;
+      }
+
+      const now = new Date();
+      const horizonEnd = new Date(now.getTime() + 21 * 86_400_000);
+      const busy = await ctx.db.event.findMany({
+        where: {
+          userId,
+          kind: EventKind.ACTIVE,
+          AND: [{ startsAt: { lt: horizonEnd } }, { endsAt: { gt: now } }],
+        },
+        select: { startsAt: true, endsAt: true },
+      });
+      const { start, end } = findFreeSlot(now, durationMin, busy);
+
+      return ctx.db.event.create({
+        data: {
+          userId,
+          startsAt: start,
+          endsAt: end,
+          kind: EventKind.ACTIVE,
+          source: EventSource.SUGGESTED,
+          confidence: 1,
+          attributions: { create: { taskId, weight: 1, ratioUnknown: false } },
+        },
+      });
+    }),
 });
+
+const WORK_START_HOUR = 8;
+const WORK_END_HOUR = 22;
+const SLOT_STEP_MIN = 15;
+
+/** First gap of `durationMin` in working hours (8 AM–10 PM) over the next 3 weeks that no ACTIVE event occupies. */
+function findFreeSlot(
+  now: Date,
+  durationMin: number,
+  busy: { startsAt: Date; endsAt: Date }[],
+): { start: Date; end: Date } {
+  const durMs = durationMin * 60_000;
+  const stepMs = SLOT_STEP_MIN * 60_000;
+  const earliest = new Date(now);
+  earliest.setSeconds(0, 0);
+  earliest.setMinutes(Math.ceil(earliest.getMinutes() / SLOT_STEP_MIN) * SLOT_STEP_MIN);
+
+  for (let day = 0; day < 21; day++) {
+    const base = startOfLocalDay(addDays(now, day));
+    const winEnd = new Date(base);
+    winEnd.setHours(WORK_END_HOUR, 0, 0, 0);
+    let t = new Date(base);
+    t.setHours(WORK_START_HOUR, 0, 0, 0);
+    if (t < earliest) t = new Date(earliest);
+    // align to step
+    t.setMinutes(Math.ceil(t.getMinutes() / SLOT_STEP_MIN) * SLOT_STEP_MIN, 0, 0);
+
+    while (t.getTime() + durMs <= winEnd.getTime()) {
+      const end = new Date(t.getTime() + durMs);
+      const overlaps = busy.some((b) => b.startsAt.getTime() < end.getTime() && b.endsAt.getTime() > t.getTime());
+      if (!overlaps) return { start: new Date(t), end };
+      t = new Date(t.getTime() + stepMs);
+    }
+  }
+  // Fallback: the earliest aligned slot regardless of collisions.
+  return { start: earliest, end: new Date(earliest.getTime() + durMs) };
+}
 
 function computeConfidence(lazy: boolean, startsAt: Date, endsAt: Date): number {
   const hours = (endsAt.getTime() - startsAt.getTime()) / 3_600_000;

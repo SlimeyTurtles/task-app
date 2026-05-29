@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { ChevronLeft, ChevronRight, Plus, Sparkles } from "lucide-react";
 import { toast } from "sonner";
 
@@ -25,6 +25,31 @@ export function CalendarClient() {
   const [hourHeight, setHourHeight] = useState(48);
   const [dialog, setDialog] = useState<EventDialogState>({ open: false });
   const [planOpen, setPlanOpen] = useState(false);
+
+  // Persist {view, hourHeight} to localStorage so navigating away and back
+  // remembers the configuration. Read deferred to avoid hydration mismatch.
+  const persisted = useRef(false);
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem("calendarView");
+      if (raw) {
+        const parsed = JSON.parse(raw) as { view?: CalendarView; hourHeight?: number };
+        if (parsed.view) setViewState(parsed.view);
+        if (typeof parsed.hourHeight === "number") setHourHeight(parsed.hourHeight);
+      }
+    } catch {
+      // ignore malformed storage
+    }
+    persisted.current = true;
+  }, []);
+  useEffect(() => {
+    if (!persisted.current) return;
+    try {
+      localStorage.setItem("calendarView", JSON.stringify({ view, hourHeight }));
+    } catch {
+      // storage may be unavailable
+    }
+  }, [view, hourHeight]);
 
   function setView(v: CalendarView) {
     setViewState(v);

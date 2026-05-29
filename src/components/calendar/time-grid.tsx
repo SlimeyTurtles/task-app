@@ -19,6 +19,7 @@ type EventTask = {
 };
 export type GridEvent = {
   id: string;
+  title: string | null;
   startsAt: Date;
   endsAt: Date;
   kind: EventKind;
@@ -26,6 +27,14 @@ export type GridEvent = {
   notes: string | null;
   attributions: { task: EventTask }[];
 };
+
+/** Display label: the event's own title, else the attributed task(s), else "Untitled". */
+export function eventLabel(ev: GridEvent): string {
+  if (ev.title && ev.title.trim()) return ev.title;
+  if (ev.attributions.length === 1) return ev.attributions[0].task.name;
+  if (ev.attributions.length > 1) return `${ev.attributions.length} parallel`;
+  return "Untitled";
+}
 type GridBlock = { id: string; startsAt: Date; endsAt: Date; kind: string; label: string | null };
 
 type DragState =
@@ -382,12 +391,7 @@ function DayColumn({
         if (!pos) return null;
         const lazy = ev.confidence < 1;
         const titleTask = ev.attributions[0]?.task;
-        const label =
-          ev.attributions.length === 0
-            ? "Untitled"
-            : ev.attributions.length === 1
-            ? titleTask?.name ?? "Event"
-            : `${ev.attributions.length} parallel`;
+        const label = eventLabel(ev);
         const color = titleTask?.area?.color ?? "var(--primary)";
         const widthPct = 100 / lanes;
         const isDragging = draggedEventId === ev.id;

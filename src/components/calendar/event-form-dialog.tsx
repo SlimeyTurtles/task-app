@@ -2,11 +2,10 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
-import { Trash2, X } from "lucide-react";
+import { Check, Search, Trash2, X } from "lucide-react";
 import { EventKind } from "@prisma/client";
 
 import { Button } from "@/components/ui/button";
-import { Checkbox } from "@/components/ui/checkbox";
 import {
   Dialog,
   DialogContent,
@@ -16,27 +15,39 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
+import { cn } from "@/lib/utils";
 import { trpc } from "@/lib/trpc/client";
 import { dateToInputValue, inputValueToDate } from "@/lib/format";
 
 function toTimeInputValue(d: Date): string {
   return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
 }
-
-function combineDateAndTime(dateStr: string, timeStr: string): Date | null {
+function combine(dateStr: string, timeStr: string): Date | null {
   const date = inputValueToDate(dateStr);
   if (!date) return null;
   const [h, m] = timeStr.split(":").map(Number);
   date.setHours(h ?? 0, m ?? 0, 0, 0);
   return date;
 }
+function durationLabel(start: Date | null, end: Date | null): string {
+  if (!start || !end || end <= start) return "";
+  const mins = Math.round((end.getTime() - start.getTime()) / 60_000);
+  const days = Math.floor(mins / 1440);
+  const h = Math.floor((mins % 1440) / 60);
+  const m = mins % 60;
+  const parts: string[] = [];
+  if (days) parts.push(`${days}d`);
+  if (h) parts.push(`${h}h`);
+  if (m) parts.push(`${m}m`);
+  return parts.join(" ") || "0m";
+}
 
 export type EventDialogState = {
   open: boolean;
   eventId?: string;
-  /** Pre-fill values when opening to create a new event. */
   init?: {
     startsAt: Date;
     endsAt: Date;
@@ -46,13 +57,19 @@ export type EventDialogState = {
   };
 };
 
-export function EventFormDialog({
-  state,
-  onClose,
-}: {
-  state: EventDialogState;
-  onClose: () => void;
-}) {
+function Section({ title, hint, children }: { title: string; hint?: string; children: React.ReactNode }) {
+  return (
+    <section className="grid gap-3">
+      <div className="flex items-baseline justify-between">
+        <h3 className="text-xs font-medium uppercase tracking-wider text-muted-foreground">{title}</h3>
+        {hint ? <span className="text-xs text-muted-foreground">{hint}</span> : null}
+      </div>
+      {children}
+    </section>
+  );
+}
+
+export function EventFormDialog({ state, onClose }: { state: EventDialogState; onClose: () => void }) {
   const utils = trpc.useUtils();
   const { data: tasks } = trpc.tasks.list.useQuery({});
   const { data: existing } = trpc.events.get.useQuery(
@@ -60,8 +77,9 @@ export function EventFormDialog({
     { enabled: Boolean(state.eventId) },
   );
 
-  const [dateStr, setDateStr] = useState("");
+  const [startDate, setStartDate] = useState("");
   const [startTime, setStartTime] = useState("09:00");
+  const [endDate, setEndDate] = useState("");
   const [endTime, setEndTime] = useState("10:00");
   const [kind, setKind] = useState<EventKind>(EventKind.ACTIVE);
   const [lazy, setLazy] = useState(false);
@@ -72,27 +90,36 @@ export function EventFormDialog({
   useEffect(() => {
     if (!state.open) return;
     if (state.eventId && existing) {
-      setDateStr(dateToInputValue(existing.startsAt));
+      setStartDate(dateToInputValue(existing.startsAt));
       setStartTime(toTimeInputValue(existing.startsAt));
+      setEndDate(dateToInputValue(existing.endsAt));
       setEndTime(toTimeInputValue(existing.endsAt));
       setKind(existing.kind);
       setLazy(existing.confidence < 1);
       setNotes(existing.notes ?? "");
       setTaskIds(existing.attributions.map((a) => a.taskId));
+      setTaskFilter("");
     } else if (state.init) {
-      setDateStr(dateToInputValue(state.init.startsAt));
+      setStartDate(dateToInputValue(state.init.startsAt));
       setStartTime(toTimeInputValue(state.init.startsAt));
+      setEndDate(dateToInputValue(state.init.endsAt));
       setEndTime(toTimeInputValue(state.init.endsAt));
       setKind(state.init.kind ?? EventKind.ACTIVE);
       setLazy(state.init.lazy ?? false);
       setNotes("");
       setTaskIds(state.init.taskIds ?? []);
+      setTaskFilter("");
     }
   }, [state.open, state.eventId, existing, state.init]);
 
   const create = trpc.events.create.useMutation();
   const update = trpc.events.update.useMutation();
   const del = trpc.events.delete.useMutation();
+  const pending = create.isPending || update.isPending;
+
+  const startAt = combine(startDate, startTime);
+  const endAt = combine(endDate, endTime);
+  const dur = durationLabel(startAt, endAt);
 
   const filteredTasks = useMemo(() => {
     if (!tasks) return [];
@@ -101,22 +128,23 @@ export function EventFormDialog({
   }, [tasks, taskFilter]);
   const tasksById = useMemo(() => new Map(tasks?.map((t) => [t.id, t]) ?? []), [tasks]);
 
-  async function onSave() {
-    const startsAt = combineDateAndTime(dateStr, startTime);
-    const endsAt = combineDateAndTime(dateStr, endTime);
-    if (!startsAt || !endsAt) {
-      toast.error("Pick a valid date and time.");
-      return;
-    }
-    if (endsAt <= startsAt) {
-      toast.error("End time must be after start time.");
-      return;
-    }
+  function toggleTask(id: string) {
+    setTaskIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
+  }
 
+  async function onSave() {
+    if (!startAt || !endAt) {
+      toast.error("Pick a valid start and end.");
+      return;
+    }
+    if (endAt <= startAt) {
+      toast.error("End must be after start.");
+      return;
+    }
     try {
       const payload = {
-        startsAt,
-        endsAt,
+        startsAt: startAt,
+        endsAt: endAt,
         notes: notes.trim() || null,
         kind,
         lazy,
@@ -148,143 +176,166 @@ export function EventFormDialog({
     }
   }
 
-  function toggleTask(id: string) {
-    setTaskIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
-  }
-
   return (
-    <Dialog
-      open={state.open}
-      onOpenChange={(open) => {
-        if (!open) onClose();
-      }}
-    >
-      <DialogContent className="max-w-lg">
-        <DialogHeader>
-          <DialogTitle>
-            {state.eventId ? "Edit event" : kind === EventKind.BACKGROUND ? "New time block" : "Log event"}
-          </DialogTitle>
+    <Dialog open={state.open} onOpenChange={(o) => (o ? null : onClose())}>
+      <DialogContent className="max-w-xl max-h-[88vh] overflow-y-auto gap-0 p-0">
+        <DialogHeader className="px-6 pt-6 pb-4 border-b">
+          <DialogTitle>{state.eventId ? "Edit event" : "New event"}</DialogTitle>
         </DialogHeader>
 
-        <div className="grid gap-4">
-          <div className="grid sm:grid-cols-3 gap-3">
-            <div className="grid gap-2">
-              <Label htmlFor="event-date">Date</Label>
-              <Input
-                id="event-date"
-                type="date"
-                value={dateStr}
-                onChange={(e) => setDateStr(e.target.value)}
-              />
+        <div className="px-6 py-5 grid gap-6">
+          {/* When */}
+          <Section title="When" hint={dur ? `${dur}${startDate !== endDate ? " · spans days" : ""}` : undefined}>
+            <div className="grid gap-3">
+              <div className="grid grid-cols-[1fr_auto] gap-2 items-end">
+                <div className="grid gap-1.5">
+                  <Label htmlFor="ev-start-date" className="text-xs text-muted-foreground">
+                    Starts
+                  </Label>
+                  <Input id="ev-start-date" type="date" className="h-10" value={startDate} onChange={(e) => setStartDate(e.target.value)} />
+                </div>
+                <Input
+                  aria-label="Start time"
+                  type="time"
+                  className="h-10 w-32"
+                  value={startTime}
+                  onChange={(e) => setStartTime(e.target.value)}
+                />
+              </div>
+              <div className="grid grid-cols-[1fr_auto] gap-2 items-end">
+                <div className="grid gap-1.5">
+                  <Label htmlFor="ev-end-date" className="text-xs text-muted-foreground">
+                    Ends
+                  </Label>
+                  <Input id="ev-end-date" type="date" className="h-10" value={endDate} onChange={(e) => setEndDate(e.target.value)} />
+                </div>
+                <Input
+                  aria-label="End time"
+                  type="time"
+                  className="h-10 w-32"
+                  value={endTime}
+                  onChange={(e) => setEndTime(e.target.value)}
+                />
+              </div>
             </div>
-            <div className="grid gap-2">
-              <Label htmlFor="event-start">Start</Label>
-              <Input
-                id="event-start"
-                type="time"
-                value={startTime}
-                onChange={(e) => setStartTime(e.target.value)}
-              />
-            </div>
-            <div className="grid gap-2">
-              <Label htmlFor="event-end">End</Label>
-              <Input
-                id="event-end"
-                type="time"
-                value={endTime}
-                onChange={(e) => setEndTime(e.target.value)}
-              />
-            </div>
-          </div>
+          </Section>
 
-          <div className="grid sm:grid-cols-2 gap-3">
-            <div className="grid gap-2">
-              <Label htmlFor="event-kind">Kind</Label>
-              <select
-                id="event-kind"
-                value={kind}
-                onChange={(e) => setKind(e.target.value as EventKind)}
-                className="h-9 rounded-md border border-input bg-transparent px-2 text-sm"
-              >
-                <option value={EventKind.ACTIVE}>Active</option>
-                <option value={EventKind.BACKGROUND}>Background (sleep / work hours / commute)</option>
-              </select>
-            </div>
-            <div className="flex items-end pb-1">
-              <label className="flex items-center gap-2 text-sm">
-                <Checkbox checked={lazy} onCheckedChange={(v) => setLazy(Boolean(v))} />
-                <span>Lazy log (low confidence)</span>
-              </label>
-            </div>
-          </div>
-
-          <div className="grid gap-2">
-            <Label htmlFor="event-notes">Notes</Label>
-            <Textarea
-              id="event-notes"
-              rows={2}
-              value={notes}
-              onChange={(e) => setNotes(e.target.value)}
-            />
-          </div>
-
-          <div className="grid gap-2">
-            <div className="flex items-center justify-between">
-              <Label>Tasks ({taskIds.length} attributed)</Label>
-              {taskIds.length > 1 ? (
-                <Badge variant="outline">parallel — ratio unknown</Badge>
-              ) : null}
-            </div>
+          {/* Tasks */}
+          <Section
+            title="Tasks"
+            hint={taskIds.length > 1 ? "parallel — ratio unknown" : taskIds.length === 1 ? "1 attributed" : undefined}
+          >
             {taskIds.length > 0 ? (
               <div className="flex flex-wrap gap-1.5">
-                {taskIds.map((id) => {
-                  const t = tasksById.get(id);
-                  return (
-                    <Badge key={id} variant="secondary" className="gap-1">
-                      {t?.name ?? id}
-                      <button
-                        type="button"
-                        className="text-muted-foreground hover:text-foreground"
-                        onClick={() => toggleTask(id)}
-                      >
-                        <X className="size-3" />
-                      </button>
-                    </Badge>
-                  );
-                })}
+                {taskIds.map((id) => (
+                  <Badge key={id} variant="secondary" className="gap-1 py-1 pl-2.5">
+                    {tasksById.get(id)?.name ?? id}
+                    <button
+                      type="button"
+                      className="text-muted-foreground hover:text-foreground"
+                      onClick={() => toggleTask(id)}
+                      aria-label="Remove task"
+                    >
+                      <X className="size-3" />
+                    </button>
+                  </Badge>
+                ))}
               </div>
             ) : null}
-            <Input
-              placeholder="Search tasks to attribute…"
-              value={taskFilter}
-              onChange={(e) => setTaskFilter(e.target.value)}
-            />
-            <div className="max-h-40 overflow-y-auto border rounded-md divide-y">
-              {filteredTasks.slice(0, 50).map((t) => {
-                const on = taskIds.includes(t.id);
-                return (
-                  <button
-                    key={t.id}
-                    type="button"
-                    onClick={() => toggleTask(t.id)}
-                    className={`w-full text-left px-3 py-1.5 text-sm flex items-center gap-2 hover:bg-accent/40 ${on ? "bg-accent/40" : ""}`}
-                  >
-                    <Checkbox checked={on} />
-                    <span className="truncate flex-1">{t.name}</span>
-                    {t.project ? (
-                      <span className="text-xs text-muted-foreground">{t.project.name}</span>
-                    ) : null}
-                  </button>
-                );
-              })}
-              {filteredTasks.length === 0 ? (
-                <p className="px-3 py-2 text-sm text-muted-foreground">No tasks.</p>
-              ) : null}
+            <div className="relative">
+              <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
+              <Input
+                placeholder="Search tasks to attribute…"
+                className="h-10 pl-8"
+                value={taskFilter}
+                onChange={(e) => setTaskFilter(e.target.value)}
+              />
             </div>
-          </div>
+            {taskFilter.trim() || taskIds.length === 0 ? (
+              <div className="max-h-44 overflow-y-auto rounded-lg border divide-y">
+                {filteredTasks.slice(0, 40).map((t) => {
+                  const on = taskIds.includes(t.id);
+                  return (
+                    <button
+                      key={t.id}
+                      type="button"
+                      onClick={() => toggleTask(t.id)}
+                      className={cn(
+                        "w-full text-left px-3 py-2 text-sm flex items-center gap-2 hover:bg-accent/40",
+                        on && "bg-accent/40",
+                      )}
+                    >
+                      <span
+                        className={cn(
+                          "size-4 rounded border flex items-center justify-center shrink-0",
+                          on ? "bg-primary border-primary text-primary-foreground" : "border-input",
+                        )}
+                      >
+                        {on ? <Check className="size-3" /> : null}
+                      </span>
+                      <span className="truncate flex-1">{t.name}</span>
+                      {t.project ? <span className="text-xs text-muted-foreground">{t.project.name}</span> : null}
+                    </button>
+                  );
+                })}
+                {filteredTasks.length === 0 ? (
+                  <p className="px-3 py-3 text-sm text-muted-foreground">No matching tasks.</p>
+                ) : null}
+              </div>
+            ) : null}
+          </Section>
+
+          {/* Details */}
+          <Section title="Details">
+            <div className="grid gap-4">
+              <div className="grid gap-1.5">
+                <Label className="text-xs text-muted-foreground">Type</Label>
+                <div className="inline-flex rounded-lg border p-0.5 w-fit">
+                  {[
+                    { v: EventKind.ACTIVE, label: "Active" },
+                    { v: EventKind.BACKGROUND, label: "Background" },
+                  ].map((opt) => (
+                    <button
+                      key={opt.v}
+                      type="button"
+                      onClick={() => setKind(opt.v)}
+                      className={cn(
+                        "px-3 py-1.5 text-sm rounded-md transition-colors",
+                        kind === opt.v ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground",
+                      )}
+                    >
+                      {opt.label}
+                    </button>
+                  ))}
+                </div>
+                {kind === EventKind.BACKGROUND ? (
+                  <p className="text-xs text-muted-foreground">
+                    Background events (sleep, work hours, commute) render as light bands behind your tasks.
+                  </p>
+                ) : null}
+              </div>
+
+              <label className="flex items-start justify-between gap-4 rounded-lg border px-3 py-2.5 cursor-pointer">
+                <span>
+                  <span className="text-sm font-medium block">Lazy log</span>
+                  <span className="text-xs text-muted-foreground">
+                    Record that it happened without trusting the exact window — lowers confidence.
+                  </span>
+                </span>
+                <Switch checked={lazy} onCheckedChange={(v) => setLazy(Boolean(v))} />
+              </label>
+
+              <div className="grid gap-1.5">
+                <Label htmlFor="ev-notes" className="text-xs text-muted-foreground">
+                  Notes
+                </Label>
+                <Textarea id="ev-notes" rows={2} value={notes} onChange={(e) => setNotes(e.target.value)} />
+              </div>
+            </div>
+          </Section>
         </div>
 
-        <DialogFooter className="justify-between">
+        <DialogFooter className="px-6 py-4 border-t justify-between">
           <div>
             {state.eventId ? (
               <Button variant="ghost" size="sm" onClick={onDelete}>
@@ -293,10 +344,10 @@ export function EventFormDialog({
             ) : null}
           </div>
           <div className="flex gap-2">
-            <Button type="button" variant="ghost" onClick={onClose}>
+            <Button variant="ghost" onClick={onClose}>
               Cancel
             </Button>
-            <Button type="button" onClick={onSave}>
+            <Button onClick={onSave} disabled={pending}>
               {state.eventId ? "Save changes" : "Log event"}
             </Button>
           </div>

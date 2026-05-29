@@ -66,6 +66,31 @@ test("redesigned calendar: week default, drag-create, granularity, no scroll", a
   await expect(page.getByText("Untitled").first()).toBeVisible();
   await page.screenshot({ path: shot("rd-03-week-with-event") });
 
+  // ── Cross-day drag → multi-day event ──
+  const box2 = (await grid.boundingBox())!;
+  const startX = box2.x + box2.width * (0 / 7) + box2.width / 14; // ~col 1
+  const endX = box2.x + box2.width * (2 / 7) + box2.width / 14; // ~col 3
+  const yStart = box2.y + box2.height * 0.5;
+  const yEnd = box2.y + box2.height * 0.7;
+  await page.mouse.move(startX, yStart);
+  await page.mouse.down();
+  await page.mouse.move(startX + 10, yStart + 10, { steps: 3 });
+  await page.mouse.move(endX, yEnd, { steps: 12 });
+  await page.mouse.up();
+  const md = page.getByRole("dialog");
+  await expect(md).toBeVisible();
+  // The redesigned form has separate start + end dates → they should differ.
+  const sDate = await md.locator("#ev-start-date").inputValue();
+  const eDate = await md.locator("#ev-end-date").inputValue();
+  expect(sDate).not.toEqual(eDate);
+  await page.screenshot({ path: shot("rd-02b-multiday-form") });
+  await md.getByRole("button", { name: /^log event$/i }).click();
+  await expect(md).toBeHidden();
+  await page.waitForTimeout(400);
+  // The multi-day event renders a segment in at least 2 day columns → ≥2 "Untitled" blocks now.
+  await expect(page.getByText("Untitled")).not.toHaveCount(1);
+  await page.screenshot({ path: shot("rd-03b-multiday") });
+
   // Switch to Day view.
   await page.getByRole("button", { name: "Day", exact: true }).click();
   await page.waitForTimeout(300);

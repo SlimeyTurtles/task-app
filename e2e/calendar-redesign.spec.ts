@@ -13,12 +13,15 @@ test("redesigned calendar: week default, drag-create, granularity, no scroll", a
   test.setTimeout(180_000);
   await page.emulateMedia({ colorScheme: "light" });
 
-  // Fail on React's "setState while rendering" / update-during-render errors.
+  // Fail on React's "setState while rendering" + hydration-mismatch errors.
   const reactErrors: string[] = [];
   page.on("console", (msg) => {
     if (msg.type() === "error") {
       const t = msg.text();
-      if (/Cannot update a component|while rendering a different component|setState/i.test(t)) {
+      if (
+        /Cannot update a component|while rendering a different component|setState/i.test(t) ||
+        /hydrat|didn't match|did not match/i.test(t)
+      ) {
         reactErrors.push(t);
       }
     }

@@ -102,6 +102,17 @@ export function TimeGrid({
   const totalHeight = 24 * hourHeight;
   const pxPerMin = hourHeight / 60;
 
+  // "Now" is client-only (null during SSR / first paint) to avoid a hydration
+  // mismatch — the server and client would otherwise compute slightly different
+  // now-line positions. Ticks every minute once mounted.
+  const [nowMs, setNowMs] = useState<number | null>(null);
+  useEffect(() => {
+    setNowMs(Date.now());
+    const id = setInterval(() => setNowMs(Date.now()), 60_000);
+    return () => clearInterval(id);
+  }, []);
+  const clientNow = nowMs != null ? new Date(nowMs) : null;
+
   // On mount, scroll to ~7 AM so the morning is in view (off-hours are above/below).
   useEffect(() => {
     if (scrollRef.current) scrollRef.current.scrollTop = 7 * hourHeight;
@@ -239,7 +250,7 @@ export function TimeGrid({
       >
         <div />
         {days.map((d) => {
-          const today = isSameDay(d, new Date());
+          const today = clientNow ? isSameDay(d, clientNow) : false;
           return (
             <div key={d.toISOString()} className="px-2 py-2 text-center border-l first:border-l-0">
               <div className="text-[0.7rem] uppercase tracking-wide text-muted-foreground">
@@ -298,6 +309,7 @@ export function TimeGrid({
               blocks={timeBlocks}
               previewRange={previewRange}
               draggedEventId={draggedEventId}
+              nowMs={nowMs}
               onPointerDownEmpty={(e) => beginCreate(e, dayIndex)}
               onPointerDownEvent={beginMove}
               onPointerDownResize={beginResize}
@@ -317,6 +329,7 @@ function DayColumn({
   blocks,
   previewRange,
   draggedEventId,
+  nowMs,
   onPointerDownEmpty,
   onPointerDownEvent,
   onPointerDownResize,
@@ -328,6 +341,7 @@ function DayColumn({
   blocks: GridBlock[];
   previewRange: { start: number; end: number } | null;
   draggedEventId?: string;
+  nowMs: number | null;
   onPointerDownEmpty: (e: ReactPointerEvent) => void;
   onPointerDownEvent: (e: ReactPointerEvent, ev: GridEvent, dayIndex: number) => void;
   onPointerDownResize: (e: ReactPointerEvent, ev: GridEvent, dayIndex: number) => void;
@@ -339,9 +353,9 @@ function DayColumn({
   const dayBlocks = blocks.filter((b) => b.startsAt.getTime() < dayEnd && b.endsAt.getTime() > dayStart);
   const laned = assignLanes(dayEvents);
 
-  const now = new Date();
-  const showNow = isSameDay(day, now);
-  const nowPct = ((now.getTime() - dayStart) / DAY_MS) * 100;
+  // Client-only "now" (null during SSR) to avoid hydration mismatch on the now-line.
+  const showNow = nowMs != null && nowMs >= dayStart && nowMs < dayEnd;
+  const nowPct = nowMs != null ? ((nowMs - dayStart) / DAY_MS) * 100 : 0;
 
   const previewPos = previewRange ? clampToDay(previewRange.start, previewRange.end, day) : null;
 

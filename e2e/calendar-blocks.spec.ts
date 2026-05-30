@@ -50,7 +50,7 @@ test("recurring background blocks + inline task create + end time on blocks", as
   await dialog.getByLabel("End time").fill("15:30");
   const search = dialog.getByPlaceholder(/search or type a new task/i);
   await search.fill("Draft the keynote");
-  await dialog.getByRole("button", { name: /create task .*draft the keynote.* attach/i }).click();
+  await dialog.getByRole("button", { name: /create .*draft the keynote/i }).click();
   await expect(dialog.getByText("Draft the keynote")).toBeVisible();
   await dialog.getByRole("button", { name: /^log event$/i }).click();
   await expect(dialog).toBeHidden();

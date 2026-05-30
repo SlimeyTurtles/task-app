@@ -48,7 +48,7 @@ test("moving an event keeps the attached task", async ({ page }) => {
   const taskName = "Review the brief";
   const search = dialog.getByPlaceholder(/search or type a new task/i);
   await search.fill(taskName);
-  await dialog.getByRole("button", { name: /create task .*review the brief.* attach/i }).click();
+  await dialog.getByRole("button", { name: /create .*review the brief/i }).click();
   await dialog.getByRole("button", { name: /^log event$/i }).click();
   await expect(dialog).toBeHidden();
   await page.waitForTimeout(400);
@@ -80,10 +80,10 @@ test("'Find a spot for me' creates a task and schedules it automatically", async
   const dialog = page.getByRole("dialog");
   await expect(dialog).toBeVisible();
   await dialog.getByLabel("Name").fill("Write the recap");
-  await dialog.getByRole("button", { name: /find a spot for me/i }).click();
+  await dialog.getByRole("button", { name: /find a spot/i }).click();
   // Metric fields appear in auto mode.
   await dialog.getByLabel("Minutes").fill("45");
-  await dialog.getByLabel(/stress \(0–10\)/i).fill("3");
+  await dialog.getByLabel("Stress", { exact: true }).fill("3");
   await page.screenshot({ path: shot("qa-03-find-a-spot-form") });
   await dialog.getByRole("button", { name: /find a spot & add/i }).click();
   await expect(dialog).toBeHidden();

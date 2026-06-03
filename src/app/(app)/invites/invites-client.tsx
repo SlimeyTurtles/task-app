@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { Check, Copy, Plus, Trash2 } from "lucide-react";
+import { Check, Copy, Plus, Send, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
@@ -40,11 +40,17 @@ export function InvitesClient() {
     onSuccess: () => utils.invites.list.invalidate(),
     onError: (e) => toast.error(e.message),
   });
+  const sendEmail = trpc.invites.sendEmail.useMutation({
+    onSuccess: (res) => toast.success(`Sent to ${res.to}`),
+    onError: (e) => toast.error(e.message),
+  });
 
   const [email, setEmail] = useState("");
   const [note, setNote] = useState("");
   const [expiresInDays, setExpiresInDays] = useState<number | "">(14);
   const [copiedId, setCopiedId] = useState<string | null>(null);
+  // Inline ad-hoc "send to..." input for invites that aren't email-locked.
+  const [sendToById, setSendToById] = useState<Record<string, string>>({});
 
   async function copyLink(code: string, id: string) {
     try {
@@ -178,6 +184,57 @@ export function InvitesClient() {
                     {copiedId === inv.id ? <Check className="size-3.5" /> : <Copy className="size-3.5" />}
                     {copiedId === inv.id ? "Copied" : "Copy link"}
                   </Button>
+                  {/* If the invite is email-locked we send it to that address
+                      with one click. If it isn't, show a tiny input so the
+                      admin can fire off a one-off send. */}
+                  {inv.email ? (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      disabled={Boolean(expired) || sendEmail.isPending}
+                      onClick={() =>
+                        sendEmail.mutate({
+                          id: inv.id,
+                          origin: window.location.origin,
+                        })
+                      }
+                    >
+                      <Send className="size-3.5" /> Send
+                    </Button>
+                  ) : (
+                    <div className="flex items-center gap-1.5">
+                      <Input
+                        type="email"
+                        placeholder="email@…"
+                        className="h-8 w-44 text-xs"
+                        value={sendToById[inv.id] ?? ""}
+                        onChange={(e) =>
+                          setSendToById((m) => ({ ...m, [inv.id]: e.target.value }))
+                        }
+                        disabled={Boolean(expired)}
+                      />
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        disabled={
+                          Boolean(expired) ||
+                          sendEmail.isPending ||
+                          !(sendToById[inv.id]?.trim())
+                        }
+                        onClick={() =>
+                          sendEmail.mutate({
+                            id: inv.id,
+                            to: sendToById[inv.id]?.trim() || null,
+                            origin: window.location.origin,
+                          })
+                        }
+                      >
+                        <Send className="size-3.5" />
+                      </Button>
+                    </div>
+                  )}
                   <Button
                     type="button"
                     variant="ghost"

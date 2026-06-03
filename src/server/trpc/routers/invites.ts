@@ -5,6 +5,7 @@ import { UserRole } from "@prisma/client";
 import { z } from "zod";
 
 import { protectedProcedure, router } from "../init";
+import { sendInviteEmail } from "@/server/lib/email";
 
 /**
  * Per-person invite tokens. Only admins can issue / revoke. Anyone can
@@ -83,5 +84,63 @@ export const invitesRouter = router({
       }
       await ctx.db.invite.delete({ where: { id: input.id } });
       return { ok: true };
+    }),
+
+  /**
+   * Email the invite link to a recipient. Accepts an optional `to` to
+   * override the address on the invite (e.g. when the invite isn't
+   * email-locked and the admin wants to send it now).
+   */
+  sendEmail: adminProcedure
+    .input(
+      z.object({
+        id: z.string(),
+        to: z.email().trim().toLowerCase().nullish(),
+        // Public origin to build the signup URL with. The router doesn't
+        // know its own hostname (server-side fetches don't carry one),
+        // so the client passes it.
+        origin: z.string().url(),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      const invite = await ctx.db.invite.findUnique({
+        where: { id: input.id },
+        include: { createdBy: { select: { name: true } } },
+      });
+      if (!invite) throw new TRPCError({ code: "NOT_FOUND" });
+      if (invite.usedAt) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: "Already claimed." });
+      }
+      if (invite.expiresAt && invite.expiresAt < new Date()) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: "Invite is expired." });
+      }
+
+      const to = input.to ?? invite.email;
+      if (!to) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "No recipient — set an email on the invite or pass one when sending.",
+        });
+      }
+      // If the invite is locked to a specific email, can't send to anyone else.
+      if (invite.email && input.to && invite.email !== input.to) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "This invite is locked to a different email.",
+        });
+      }
+
+      const url = `${input.origin.replace(/\/$/, "")}/register?invite=${invite.code}`;
+      const result = await sendInviteEmail({
+        to,
+        invitedByName: invite.createdBy.name,
+        code: invite.code,
+        url,
+        note: invite.note,
+      });
+      if (!result.ok) {
+        throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: result.error });
+      }
+      return { ok: true as const, to };
     }),
 });

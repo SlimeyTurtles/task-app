@@ -50,6 +50,9 @@ services:
       CLAUDE_API_KEY: ${CLAUDE_API_KEY}
       GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
       GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
+      RESEND_API_KEY: ${RESEND_API_KEY:-}
+      EMAIL_FROM: ${EMAIL_FROM:-Almanac <almanac@avinh.net>}
+      EMAIL_REPLY_TO: ${EMAIL_REPLY_TO:-avinhahuynh@gmail.com}
     ports:
       - "${WEB_PORT:-3002}:3000"
     # First boot: bring an empty volume up to schema, then start the

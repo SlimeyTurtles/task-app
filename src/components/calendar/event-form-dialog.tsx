@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
-import { Check, Plus, Search, Trash2, X } from "lucide-react";
+import { Check, Plus, Search, Sparkles, Trash2, X } from "lucide-react";
 import { EventKind, TimeBlockKind } from "@prisma/client";
 
 import { Button } from "@/components/ui/button";
@@ -18,6 +18,7 @@ import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
+import { TagPicker } from "@/components/tasks/tag-picker";
 import { cn } from "@/lib/utils";
 import { trpc } from "@/lib/trpc/client";
 import { dateToInputValue, inputValueToDate } from "@/lib/format";
@@ -66,12 +67,129 @@ export type EventDialogState = {
   };
 };
 
+type AiOverlayState =
+  | { phase: "inferring" }
+  | { phase: "done"; inferred: Partial<Record<"estimatedMinutes" | "stress" | "exhaustion" | "importance" | "urgency", number>> };
+
+const CONFETTI = ["✦", "✶", "✷", "✺", "✹", "✧"];
+const FIELD_LABELS: Record<string, string> = {
+  estimatedMinutes: "Min",
+  stress: "Stress",
+  exhaustion: "Exhaust",
+  importance: "Importance",
+  urgency: "Urgency",
+};
+const DONE_FLAVOUR = [
+  "AI sweated the small stuff for you.",
+  "Sized up and slotted in.",
+  "Filed under: done.",
+  "On the books — drag it around if you don't agree.",
+];
+
+function AiOverlay({ state }: { state: AiOverlayState }) {
+  // Stable confetti positions per mount so they don't jitter on re-render.
+  const confetti = useMemo(
+    () =>
+      Array.from({ length: 14 }, (_, i) => ({
+        char: CONFETTI[i % CONFETTI.length],
+        left: 8 + ((i * 37) % 84),
+        top: 6 + ((i * 53) % 80),
+        delay: (i * 90) % 700,
+        size: 14 + ((i * 7) % 14),
+      })),
+    [],
+  );
+  const flavour = useMemo(() => DONE_FLAVOUR[Math.floor(Math.random() * DONE_FLAVOUR.length)], []);
+
+  return (
+    <div className="absolute inset-0 z-20 flex items-center justify-center bg-popover/95 backdrop-blur-sm animate-in fade-in-0 duration-200">
+      {state.phase === "inferring" ? (
+        <div className="flex flex-col items-center gap-3 text-center px-6">
+          <Sparkles className="size-10 text-primary animate-pulse" />
+          <p className="font-heading text-2xl tracking-tight">Sizing up your task…</p>
+          <p className="text-xs text-muted-foreground max-w-xs">
+            Claude is reading your description and filling in the blanks.
+          </p>
+        </div>
+      ) : (
+        <div className="relative flex flex-col items-center gap-3 text-center px-6 py-4 animate-in zoom-in-95 fade-in-0 duration-300">
+          <div className="absolute inset-0 pointer-events-none overflow-hidden">
+            {confetti.map((c, i) => (
+              <span
+                key={i}
+                className="absolute text-primary/70 animate-bounce"
+                style={{
+                  left: `${c.left}%`,
+                  top: `${c.top}%`,
+                  fontSize: `${c.size}px`,
+                  animationDelay: `${c.delay}ms`,
+                  animationDuration: "1.4s",
+                }}
+              >
+                {c.char}
+              </span>
+            ))}
+          </div>
+          <Sparkles className="size-10 text-primary" />
+          <p className="font-heading text-2xl tracking-tight">All set</p>
+          <p className="text-xs text-muted-foreground max-w-xs">{flavour}</p>
+          <div className="mt-2 grid grid-cols-2 gap-x-6 gap-y-1.5 text-sm">
+            {Object.entries(state.inferred).map(([k, v]) => (
+              <div key={k} className="flex items-baseline justify-between gap-3 min-w-32">
+                <span className="text-[10px] uppercase tracking-wider text-muted-foreground">{FIELD_LABELS[k] ?? k}</span>
+                <span className="font-mono tabular-nums">{v}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function SectionHeader({ title, hint }: { title: string; hint?: string }) {
   return (
-    <div className="flex items-baseline justify-between mb-2">
+    <div className="flex items-baseline justify-between mb-1.5">
       <h3 className="text-xs font-medium uppercase tracking-wider text-muted-foreground">{title}</h3>
       {hint ? <span className="text-xs text-muted-foreground">{hint}</span> : null}
     </div>
+  );
+}
+
+// Inputs in the sidebar use a stripped-down, bottom-border-only style so the
+// sidebar reads as metadata rather than a stack of form fields.
+const discreteInputClass =
+  "h-7 border-0 border-b border-input rounded-none px-1 text-xs shadow-none focus-visible:ring-0 focus-visible:border-foreground/60 dark:bg-transparent";
+
+function MetaRow({
+  label,
+  value,
+  onChange,
+  placeholder,
+  min,
+  max,
+}: {
+  label: string;
+  value: string;
+  onChange: (v: string) => void;
+  placeholder?: string;
+  min?: number;
+  max?: number;
+}) {
+  return (
+    <label className="grid grid-cols-[1fr_5rem] items-center gap-2 text-xs">
+      <span className="text-[10px] text-muted-foreground uppercase tracking-wider font-medium">{label}</span>
+      <Input
+        type="number"
+        inputMode="numeric"
+        min={min}
+        max={max}
+        className={discreteInputClass}
+        placeholder={placeholder}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+      />
+    </label>
   );
 }
 
@@ -85,7 +203,7 @@ export function EventFormDialog({ state, onClose }: { state: EventDialogState; o
 
   const editing = Boolean(state.eventId);
   const [mode, setMode] = useState<Mode>("event");
-  const [whenMode, setWhenMode] = useState<WhenMode>("manual");
+  const [whenMode, setWhenMode] = useState<WhenMode>("auto");
 
   const [eventTitle, setEventTitle] = useState("");
   const [startDate, setStartDate] = useState("");
@@ -96,11 +214,17 @@ export function EventFormDialog({ state, onClose }: { state: EventDialogState; o
   const [notes, setNotes] = useState("");
   const [taskIds, setTaskIds] = useState<string[]>([]);
   const [taskFilter, setTaskFilter] = useState("");
+  const [createTask, setCreateTask] = useState(true);
+  // Tags get applied to the linked task (event color is derived from them).
+  const [tagIds, setTagIds] = useState<string[]>([]);
 
-  // auto-mode metrics
+  // Task metadata — left blank, Claude infers from description.
   const [estimateMin, setEstimateMin] = useState("");
   const [stressVal, setStressVal] = useState("");
   const [exhVal, setExhVal] = useState("");
+  const [impVal, setImpVal] = useState("");
+  const [urgVal, setUrgVal] = useState("");
+  const [dueDate, setDueDate] = useState("");
 
   // block-only
   const [blockKind, setBlockKind] = useState<TimeBlockKind>(TimeBlockKind.SLEEP);
@@ -108,12 +232,21 @@ export function EventFormDialog({ state, onClose }: { state: EventDialogState; o
   const [repeat, setRepeat] = useState<Repeat>("none");
   const [schedulable, setSchedulable] = useState(false);
 
+  // AI overlay states.
+  type AiState =
+    | { phase: "idle" }
+    | { phase: "inferring" }
+    | { phase: "done"; inferred: Partial<Record<"estimatedMinutes" | "stress" | "exhaustion" | "importance" | "urgency", number>> };
+  const [aiState, setAiState] = useState<AiState>({ phase: "idle" });
+
   useEffect(() => {
     if (!state.open) return;
     if (state.eventId && existing) {
       setMode("event");
       setWhenMode("manual");
-      setEventTitle(existing.title ?? "");
+      // Fall back to the linked task's name — events created via drop-on-calendar
+      // / log-task don't set their own title, so existing.title is null.
+      setEventTitle(existing.title ?? existing.attributions[0]?.task?.name ?? "");
       setStartDate(dateToInputValue(existing.startsAt));
       setStartTime(toTimeInputValue(existing.startsAt));
       setEndDate(dateToInputValue(existing.endsAt));
@@ -122,9 +255,21 @@ export function EventFormDialog({ state, onClose }: { state: EventDialogState; o
       setNotes(existing.notes ?? "");
       setTaskIds(existing.attributions.map((a) => a.taskId));
       setTaskFilter("");
+      setCreateTask(false);
+      // Seed metadata + tags from the title task — that's where the event color
+      // and the user's planning numbers actually live.
+      const titleTask = existing.attributions[0]?.task;
+      setEstimateMin(titleTask?.estimatedMinutes != null ? String(titleTask.estimatedMinutes) : "");
+      setStressVal(titleTask?.stress != null ? String(titleTask.stress) : "");
+      setExhVal(titleTask?.exhaustion != null ? String(titleTask.exhaustion) : "");
+      setImpVal(titleTask?.importance != null ? String(titleTask.importance) : "");
+      setUrgVal(titleTask?.urgency != null ? String(titleTask.urgency) : "");
+      setDueDate(titleTask?.dueDate ? dateToInputValue(titleTask.dueDate) : "");
+      setTagIds((titleTask?.tags ?? []).map((t) => t.tagId));
     } else if (state.init) {
       setMode(state.init.kind === EventKind.BACKGROUND ? "block" : "event");
-      setWhenMode("manual");
+      // New events default to "Find a spot" + auto-create a linked task.
+      setWhenMode("auto");
       setEventTitle("");
       setStartDate(dateToInputValue(state.init.startsAt));
       setStartTime(toTimeInputValue(state.init.startsAt));
@@ -134,14 +279,20 @@ export function EventFormDialog({ state, onClose }: { state: EventDialogState; o
       setNotes("");
       setTaskIds(state.init.taskIds ?? []);
       setTaskFilter("");
+      setCreateTask(true);
       setEstimateMin("");
       setStressVal("");
       setExhVal("");
+      setImpVal("");
+      setUrgVal("");
+      setDueDate("");
       setBlockKind(TimeBlockKind.SLEEP);
       setBlockLabel("");
       setRepeat("none");
       setSchedulable(false);
+      setTagIds([]);
     }
+    setAiState({ phase: "idle" });
   }, [state.open, state.eventId, existing, state.init]);
 
   const createEvent = trpc.events.create.useMutation();
@@ -150,6 +301,7 @@ export function EventFormDialog({ state, onClose }: { state: EventDialogState; o
   const createBlock = trpc.timeBlocks.create.useMutation();
   const quickCapture = trpc.tasks.quickCapture.useMutation();
   const quickAdd = trpc.events.quickAdd.useMutation();
+  const updateTask = trpc.tasks.update.useMutation();
   const pending =
     createEvent.isPending ||
     updateEvent.isPending ||
@@ -220,55 +372,106 @@ export function EventFormDialog({ state, onClose }: { state: EventDialogState; o
         return;
       }
 
-      // ── Event: find a spot (auto-schedule) ──
-      if (whenMode === "auto" && !editing) {
-        const title = eventTitle.trim();
-        if (!title) {
-          toast.error("Add a name first.");
+      // ── Editing an existing event: events.update, then write tags through to
+      //    the title task so the event color picks them up.
+      if (editing && state.eventId) {
+        if (!startAt || !endAt) {
+          toast.error("Pick a valid start and end.");
           return;
         }
-        await quickAdd.mutateAsync({
-          title,
-          description: notes.trim() || null,
-          estimatedMinutes: toIntOrNull(estimateMin),
-          stress: toIntOrNull(stressVal),
-          exhaustion: toIntOrNull(exhVal),
-          attachTaskId: taskIds[0] ?? null,
+        if (endAt <= startAt) {
+          toast.error("End must be after start.");
+          return;
+        }
+        await updateEvent.mutateAsync({
+          id: state.eventId,
+          title: eventTitle.trim() || null,
+          startsAt: startAt,
+          endsAt: endAt,
+          notes: notes.trim() || null,
+          kind: EventKind.ACTIVE,
+          lazy,
+          attributions: taskIds.map((id) => ({ taskId: id, weight: 1, ratioUnknown: false })),
         });
-        toast.success("Scheduled — drag it to adjust.");
-        await Promise.all([utils.events.list.invalidate(), utils.tasks.list.invalidate()]);
+        // Persist tags to the first attached task (the one that drives color).
+        const titleTaskId = taskIds[0] ?? existing?.attributions[0]?.taskId;
+        const existingTagIds = (existing?.attributions[0]?.task?.tags ?? []).map((t) => t.tagId);
+        const changed =
+          tagIds.length !== existingTagIds.length ||
+          tagIds.some((id) => !existingTagIds.includes(id));
+        if (titleTaskId && changed) {
+          await updateTask.mutateAsync({ id: titleTaskId, tagIds });
+          await utils.tasks.list.invalidate();
+        }
+        toast.success("Event updated.");
+        await utils.events.list.invalidate();
         onClose();
         return;
       }
 
-      // ── Event: manual time ──
-      if (!startAt || !endAt) {
-        toast.error("Pick a valid start and end.");
+      // ── New event (either When mode): always route through quickAdd so AI
+      //    inference runs uniformly. Manual mode passes startsAt/endsAt;
+      //    auto mode omits them and lets the server find a slot.
+      const titleTrim = eventTitle.trim();
+      if (!titleTrim) {
+        toast.error("Add a name first.");
         return;
       }
-      if (endAt <= startAt) {
-        toast.error("End must be after start.");
-        return;
+      if (whenMode === "manual") {
+        if (!startAt || !endAt) {
+          toast.error("Pick a valid start and end.");
+          return;
+        }
+        if (endAt <= startAt) {
+          toast.error("End must be after start.");
+          return;
+        }
       }
-      const payload = {
-        title: eventTitle.trim() || null,
-        startsAt: startAt,
-        endsAt: endAt,
-        notes: notes.trim() || null,
-        kind: EventKind.ACTIVE,
-        lazy,
-        attributions: taskIds.map((id) => ({ taskId: id, weight: 1, ratioUnknown: false })),
+
+      const provided = {
+        estimatedMinutes: toIntOrNull(estimateMin),
+        stress: toIntOrNull(stressVal),
+        exhaustion: toIntOrNull(exhVal),
+        importance: toIntOrNull(impVal),
+        urgency: toIntOrNull(urgVal),
       };
-      if (state.eventId) {
-        await updateEvent.mutateAsync({ id: state.eventId, ...payload });
-        toast.success("Event updated.");
+      const willInfer =
+        notes.trim().length > 0 &&
+        Object.values(provided).some((v) => v == null);
+      if (willInfer) setAiState({ phase: "inferring" });
+
+      const result = await quickAdd.mutateAsync({
+        title: titleTrim,
+        description: notes.trim() || null,
+        ...provided,
+        dueDate: inputValueToDate(dueDate),
+        attachTaskId: taskIds[0] ?? null,
+        createTask: createTask && taskIds.length === 0,
+        tagIds: tagIds.length ? tagIds : undefined,
+        startsAt: whenMode === "manual" ? (startAt ?? null) : null,
+        endsAt: whenMode === "manual" ? (endAt ?? null) : null,
+        lazy,
+      });
+
+      await Promise.all([utils.events.list.invalidate(), utils.tasks.list.invalidate()]);
+
+      const inferredEntries = Object.entries(result.inferred ?? {}).filter(
+        ([, v]) => typeof v === "number",
+      ) as [keyof typeof provided, number][];
+
+      if (inferredEntries.length > 0) {
+        setAiState({ phase: "done", inferred: Object.fromEntries(inferredEntries) });
+        setTimeout(onClose, 1800);
       } else {
-        await createEvent.mutateAsync(payload);
-        toast.success("Event logged.");
+        toast.success(
+          createTask && taskIds.length === 0
+            ? "Scheduled with a new task — drag to adjust."
+            : "Scheduled — drag it to adjust.",
+        );
+        onClose();
       }
-      await utils.events.list.invalidate();
-      onClose();
     } catch (err) {
+      setAiState({ phase: "idle" });
       toast.error(err instanceof Error ? err.message : "Failed to save.");
     }
   }
@@ -295,223 +498,255 @@ export function EventFormDialog({ state, onClose }: { state: EventDialogState; o
 
   return (
     <Dialog open={state.open} onOpenChange={(o) => (o ? null : onClose())}>
-      <DialogContent className="sm:max-w-3xl max-h-[92vh] overflow-y-auto gap-0 p-0">
-        <DialogHeader className="px-5 pt-5 pb-3 border-b">
+      <DialogContent className="sm:max-w-3xl gap-0 p-0 relative overflow-hidden">
+        <DialogHeader className="px-5 pt-4 pb-2.5 border-b">
           <DialogTitle>{title}</DialogTitle>
         </DialogHeader>
 
-        <div className="px-5 py-4 grid gap-4">
-          {/* Type toggle (event vs block) — create only */}
-          {!editing ? (
-            <div className="inline-flex rounded-lg border p-0.5 w-full">
-              {([
-                { v: "event", label: "Event / task" },
-                { v: "block", label: "Background block" },
-              ] as const).map((opt) => (
-                <button
-                  key={opt.v}
-                  type="button"
-                  onClick={() => setMode(opt.v)}
-                  className={cn(
-                    "flex-1 px-3 py-1 text-sm rounded-md transition-colors",
-                    mode === opt.v ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground",
-                  )}
-                >
-                  {opt.label}
-                </button>
-              ))}
-            </div>
-          ) : null}
-
+        <div className="px-5 py-3 grid gap-3">
           {mode === "event" ? (
-            <>
-              {/* Name (full width) */}
-              <div className="grid gap-1">
-                <Label htmlFor="ev-title" className="text-xs text-muted-foreground">Name</Label>
-                <Input
-                  id="ev-title"
-                  className="h-9"
-                  placeholder="What is this? e.g. Dentist, Draft proposal…"
-                  value={eventTitle}
-                  onChange={(e) => setEventTitle(e.target.value)}
-                  autoFocus
-                />
+            <div className="grid md:grid-cols-[1.35fr_1fr] gap-5 items-stretch">
+              {/* MAIN COLUMN: title + big description (fills sidebar height) */}
+              <div className="flex flex-col gap-2 min-w-0">
+                <div className="grid gap-1 shrink-0">
+                  <Label htmlFor="ev-title" className="text-xs text-muted-foreground">Name</Label>
+                  <Input
+                    id="ev-title"
+                    className="h-10"
+                    placeholder="What is this? e.g. Dentist, Draft proposal…"
+                    value={eventTitle}
+                    onChange={(e) => setEventTitle(e.target.value)}
+                    autoFocus
+                  />
+                </div>
+                <div className="flex flex-col gap-1 flex-1 min-h-0">
+                  <div className="flex items-baseline justify-between shrink-0">
+                    <Label htmlFor="ev-notes" className="text-xs text-muted-foreground">Description</Label>
+                    <span className="text-xs text-muted-foreground italic">AI fills the rest</span>
+                  </div>
+                  <Textarea
+                    id="ev-notes"
+                    placeholder="Anything else — links, context, sub-steps. Blank fields will be inferred."
+                    value={notes}
+                    onChange={(e) => setNotes(e.target.value)}
+                    className="resize-none flex-1 min-h-0"
+                  />
+                </div>
               </div>
 
-              <div className="grid md:grid-cols-2 gap-5">
-                {/* LEFT COLUMN: When + (auto) metrics + Lazy */}
-                <div className="grid gap-4">
-                  <section>
-                    <SectionHeader
-                      title="When"
-                      hint={whenMode === "manual" && dur ? `${dur}${startDate !== endDate ? " · spans days" : ""}` : undefined}
-                    />
+              {/* SIDEBAR: Jira-style metadata rows */}
+              <div className="grid gap-2.5 min-w-0 content-start">
+                {/* Type toggle */}
+                {!editing ? (
+                  <div className="inline-flex rounded-lg border p-0.5 w-full">
+                    {([
+                      { v: "event", label: "Event / task" },
+                      { v: "block", label: "Block" },
+                    ] as const).map((opt) => (
+                      <button
+                        key={opt.v}
+                        type="button"
+                        onClick={() => setMode(opt.v)}
+                        className={cn(
+                          "flex-1 px-2 py-0.5 text-xs rounded-md transition-colors",
+                          mode === opt.v ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground",
+                        )}
+                      >
+                        {opt.label}
+                      </button>
+                    ))}
+                  </div>
+                ) : null}
+
+                {/* When */}
+                {!editing ? (
+                  <div className="inline-flex rounded-lg border p-0.5 w-full">
+                    {([
+                      { v: "auto", label: "Find a spot" },
+                      { v: "manual", label: "Pick a time" },
+                    ] as const).map((opt) => (
+                      <button
+                        key={opt.v}
+                        type="button"
+                        onClick={() => setWhenMode(opt.v)}
+                        className={cn(
+                          "flex-1 px-2 py-0.5 text-xs rounded-md transition-colors",
+                          whenMode === opt.v ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground",
+                        )}
+                      >
+                        {opt.label}
+                      </button>
+                    ))}
+                  </div>
+                ) : null}
+
+                {whenMode === "manual" || editing ? (
+                  <div className="grid gap-1.5">
+                    <div className="grid grid-cols-[1fr_auto] gap-1.5 items-end">
+                      <div className="grid gap-0.5">
+                        <Label htmlFor="ev-start-date" className="text-[10px] text-muted-foreground uppercase tracking-wider">Starts</Label>
+                        <Input id="ev-start-date" type="date" className={discreteInputClass} value={startDate} onChange={(e) => setStartDate(e.target.value)} />
+                      </div>
+                      <Input aria-label="Start time" type="time" className={cn(discreteInputClass, "w-24")} value={startTime} onChange={(e) => setStartTime(e.target.value)} />
+                    </div>
+                    <div className="grid grid-cols-[1fr_auto] gap-1.5 items-end">
+                      <div className="grid gap-0.5">
+                        <Label htmlFor="ev-end-date" className="text-[10px] text-muted-foreground uppercase tracking-wider">Ends</Label>
+                        <Input id="ev-end-date" type="date" className={discreteInputClass} value={endDate} onChange={(e) => setEndDate(e.target.value)} />
+                      </div>
+                      <Input aria-label="End time" type="time" className={cn(discreteInputClass, "w-24")} value={endTime} onChange={(e) => setEndTime(e.target.value)} />
+                    </div>
+                    {dur ? <p className="text-[10px] text-muted-foreground -mt-1">{dur}{startDate !== endDate ? " · spans days" : ""}</p> : null}
+                  </div>
+                ) : (
+                  <p className="text-[11px] text-muted-foreground leading-snug">
+                    Drops into the next free slot in your working hours — drag to adjust after.
+                  </p>
+                )}
+
+                {/* Jira-style metadata rows. Blank = AI infers. */}
+                <div className="grid gap-1 pt-2 border-t">
+                  <p className="text-[10px] text-muted-foreground italic mb-0.5">Blank fields get inferred from the description</p>
+                  <MetaRow label="Minutes" value={estimateMin} onChange={setEstimateMin} placeholder="60" min={5} max={12 * 60} />
+                  <MetaRow label="Stress" value={stressVal} onChange={setStressVal} placeholder="0–10" min={0} max={10} />
+                  <MetaRow label="Exhaust" value={exhVal} onChange={setExhVal} placeholder="0–10" min={0} max={10} />
+                  <MetaRow label="Importance" value={impVal} onChange={setImpVal} placeholder="0–10" min={0} max={10} />
+                  <MetaRow label="Urgency" value={urgVal} onChange={setUrgVal} placeholder="0–10" min={0} max={10} />
+                  <div className="grid grid-cols-[1fr_5rem] items-center gap-2 text-xs">
+                    <Label htmlFor="ev-due" className="text-[10px] text-muted-foreground uppercase tracking-wider font-medium">Due</Label>
+                    <Input id="ev-due" type="date" className={discreteInputClass} value={dueDate} onChange={(e) => setDueDate(e.target.value)} />
+                  </div>
+                </div>
+
+                {/* Task linkage */}
+                <div className="grid gap-1.5 pt-2 border-t">
+                  <div className="flex items-center justify-between">
+                    <h3 className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">Task</h3>
                     {!editing ? (
-                      <div className="inline-flex rounded-lg border p-0.5 w-full mb-2">
-                        {([
-                          { v: "manual", label: "Pick a time" },
-                          { v: "auto", label: "Find a spot" },
-                        ] as const).map((opt) => (
+                      <label className="flex items-center gap-1.5 text-[11px] cursor-pointer">
+                        <span className="text-muted-foreground">Auto-create</span>
+                        <Switch
+                          checked={createTask && taskIds.length === 0}
+                          disabled={taskIds.length > 0}
+                          onCheckedChange={(v) => setCreateTask(Boolean(v))}
+                        />
+                      </label>
+                    ) : (
+                      <span className="text-[11px] text-muted-foreground">
+                        {taskIds.length > 1 ? "parallel" : taskIds.length === 1 ? "1 attached" : "optional"}
+                      </span>
+                    )}
+                  </div>
+                  {taskIds.length > 0 ? (
+                    <div className="flex flex-wrap gap-1">
+                      {taskIds.map((id) => (
+                        <Badge key={id} variant="secondary" className="gap-1 py-0.5 pl-2 max-w-full text-xs">
+                          <span className="truncate">{tasksById.get(id)?.name ?? id}</span>
                           <button
-                            key={opt.v}
                             type="button"
-                            onClick={() => setWhenMode(opt.v)}
+                            className="text-muted-foreground hover:text-foreground shrink-0"
+                            onClick={() => toggleTask(id)}
+                            aria-label="Remove task"
+                          >
+                            <X className="size-3" />
+                          </button>
+                        </Badge>
+                      ))}
+                    </div>
+                  ) : null}
+                  <div className="relative">
+                    <Search className="absolute left-1 top-1/2 -translate-y-1/2 size-3.5 text-muted-foreground pointer-events-none" />
+                    <Input
+                      placeholder="Attach existing task…"
+                      className={cn(discreteInputClass, "pl-6")}
+                      value={taskFilter}
+                      onChange={(e) => setTaskFilter(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" && taskFilter.trim() && !exactMatch) {
+                          e.preventDefault();
+                          void createAndAttach();
+                        }
+                      }}
+                    />
+                  </div>
+                  {taskFilter.trim() ? (
+                    <div className="rounded-lg border divide-y max-h-40 overflow-y-auto">
+                      {!exactMatch ? (
+                        <button
+                          type="button"
+                          onClick={createAndAttach}
+                          className="w-full text-left px-2.5 py-1.5 text-xs flex items-center gap-2 hover:bg-accent/40"
+                        >
+                          <Plus className="size-3 text-primary" />
+                          <span className="truncate">Create &ldquo;{taskFilter.trim()}&rdquo;</span>
+                        </button>
+                      ) : null}
+                      {filteredTasks.slice(0, 40).map((t) => {
+                        const on = taskIds.includes(t.id);
+                        return (
+                          <button
+                            key={t.id}
+                            type="button"
+                            onClick={() => toggleTask(t.id)}
                             className={cn(
-                              "flex-1 px-2 py-1 text-xs rounded-md transition-colors",
-                              whenMode === opt.v ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground",
+                              "w-full text-left px-2.5 py-1.5 text-xs flex items-center gap-2 hover:bg-accent/40",
+                              on && "bg-accent/40",
                             )}
                           >
-                            {opt.label}
+                            <span className={cn("size-3.5 rounded border flex items-center justify-center shrink-0", on ? "bg-primary border-primary text-primary-foreground" : "border-input")}>
+                              {on ? <Check className="size-2.5" /> : null}
+                            </span>
+                            <span className="truncate flex-1">{t.name}</span>
                           </button>
-                        ))}
-                      </div>
-                    ) : null}
-
-                    {whenMode === "manual" || editing ? (
-                      <div className="grid gap-2">
-                        <div className="grid grid-cols-[1fr_auto] gap-2 items-end">
-                          <div className="grid gap-1">
-                            <Label htmlFor="ev-start-date" className="text-xs text-muted-foreground">Starts</Label>
-                            <Input id="ev-start-date" type="date" className="h-9" value={startDate} onChange={(e) => setStartDate(e.target.value)} />
-                          </div>
-                          <Input aria-label="Start time" type="time" className="h-9 w-28" value={startTime} onChange={(e) => setStartTime(e.target.value)} />
-                        </div>
-                        <div className="grid grid-cols-[1fr_auto] gap-2 items-end">
-                          <div className="grid gap-1">
-                            <Label htmlFor="ev-end-date" className="text-xs text-muted-foreground">Ends</Label>
-                            <Input id="ev-end-date" type="date" className="h-9" value={endDate} onChange={(e) => setEndDate(e.target.value)} />
-                          </div>
-                          <Input aria-label="End time" type="time" className="h-9 w-28" value={endTime} onChange={(e) => setEndTime(e.target.value)} />
-                        </div>
-                      </div>
-                    ) : (
-                      <p className="text-xs text-muted-foreground leading-snug">
-                        Placed in the next free slot in your working hours — drag to adjust.
-                      </p>
-                    )}
-                  </section>
-
-                  {whenMode === "auto" && !editing ? (
-                    <section>
-                      <SectionHeader title="How long & how hard" hint="optional" />
-                      <div className="grid grid-cols-3 gap-2">
-                        <div className="grid gap-1">
-                          <Label htmlFor="ev-est" className="text-xs text-muted-foreground">Minutes</Label>
-                          <Input id="ev-est" type="number" inputMode="numeric" min={5} className="h-9" placeholder="60" value={estimateMin} onChange={(e) => setEstimateMin(e.target.value)} />
-                        </div>
-                        <div className="grid gap-1">
-                          <Label htmlFor="ev-stress" className="text-xs text-muted-foreground">Stress</Label>
-                          <Input id="ev-stress" type="number" inputMode="numeric" min={0} max={10} className="h-9" value={stressVal} onChange={(e) => setStressVal(e.target.value)} />
-                        </div>
-                        <div className="grid gap-1">
-                          <Label htmlFor="ev-exh" className="text-xs text-muted-foreground">Exhaust</Label>
-                          <Input id="ev-exh" type="number" inputMode="numeric" min={0} max={10} className="h-9" value={exhVal} onChange={(e) => setExhVal(e.target.value)} />
-                        </div>
-                      </div>
-                    </section>
-                  ) : null}
-
-                  {whenMode === "manual" || editing ? (
-                    <label className="flex items-center justify-between gap-3 text-sm cursor-pointer">
-                      <span className="flex items-baseline gap-2">
-                        <span className="font-medium">Lazy log</span>
-                        <span className="text-xs text-muted-foreground">lowers confidence</span>
-                      </span>
-                      <Switch checked={lazy} onCheckedChange={(v) => setLazy(Boolean(v))} />
-                    </label>
-                  ) : null}
-                </div>
-
-                {/* RIGHT COLUMN: Tasks (chips + search + on-demand list) + About */}
-                <div className="grid gap-4 min-w-0">
-                  <section>
-                    <SectionHeader
-                      title="Tasks"
-                      hint={taskIds.length > 1 ? "parallel" : taskIds.length === 1 ? "1 attached" : "optional"}
-                    />
-                    {taskIds.length > 0 ? (
-                      <div className="flex flex-wrap gap-1 mb-2">
-                        {taskIds.map((id) => (
-                          <Badge key={id} variant="secondary" className="gap-1 py-0.5 pl-2 max-w-full">
-                            <span className="truncate">{tasksById.get(id)?.name ?? id}</span>
-                            <button
-                              type="button"
-                              className="text-muted-foreground hover:text-foreground shrink-0"
-                              onClick={() => toggleTask(id)}
-                              aria-label="Remove task"
-                            >
-                              <X className="size-3" />
-                            </button>
-                          </Badge>
-                        ))}
-                      </div>
-                    ) : null}
-                    <div className="relative">
-                      <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 size-4 text-muted-foreground pointer-events-none" />
-                      <Input
-                        placeholder="Search or type a new task…"
-                        className="h-9 pl-8"
-                        value={taskFilter}
-                        onChange={(e) => setTaskFilter(e.target.value)}
-                        onKeyDown={(e) => {
-                          if (e.key === "Enter" && taskFilter.trim() && !exactMatch) {
-                            e.preventDefault();
-                            void createAndAttach();
-                          }
-                        }}
-                      />
+                        );
+                      })}
                     </div>
-                    {/* Inline create / list only when the user is actively searching. */}
-                    {taskFilter.trim() ? (
-                      <div className="mt-2 rounded-lg border divide-y max-h-40 overflow-y-auto">
-                        {!exactMatch ? (
-                          <button
-                            type="button"
-                            onClick={createAndAttach}
-                            className="w-full text-left px-3 py-2 text-sm flex items-center gap-2 hover:bg-accent/40"
-                          >
-                            <Plus className="size-3.5 text-primary" />
-                            <span className="truncate">Create &ldquo;{taskFilter.trim()}&rdquo;</span>
-                          </button>
-                        ) : null}
-                        {filteredTasks.slice(0, 40).map((t) => {
-                          const on = taskIds.includes(t.id);
-                          return (
-                            <button
-                              key={t.id}
-                              type="button"
-                              onClick={() => toggleTask(t.id)}
-                              className={cn(
-                                "w-full text-left px-3 py-2 text-sm flex items-center gap-2 hover:bg-accent/40",
-                                on && "bg-accent/40",
-                              )}
-                            >
-                              <span className={cn("size-4 rounded border flex items-center justify-center shrink-0", on ? "bg-primary border-primary text-primary-foreground" : "border-input")}>
-                                {on ? <Check className="size-3" /> : null}
-                              </span>
-                              <span className="truncate flex-1">{t.name}</span>
-                            </button>
-                          );
-                        })}
-                      </div>
-                    ) : null}
-                  </section>
-
-                  <section>
-                    <SectionHeader title="About" hint="optional" />
-                    <Textarea
-                      rows={2}
-                      placeholder="What is this about?"
-                      value={notes}
-                      onChange={(e) => setNotes(e.target.value)}
-                    />
-                  </section>
+                  ) : null}
                 </div>
+
+                {/* Tags — drive the event's color (first tag with a color wins). */}
+                <div className="grid gap-1.5 pt-2 border-t">
+                  <div className="flex items-center justify-between">
+                    <h3 className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">Tags</h3>
+                    <span className="text-[11px] text-muted-foreground">color the block</span>
+                  </div>
+                  <TagPicker value={tagIds} onChange={setTagIds} placeholder="Tag this event…" />
+                </div>
+
+                {whenMode === "manual" || editing ? (
+                  <label className="flex items-center justify-between gap-3 text-[11px] cursor-pointer pt-1.5 border-t">
+                    <span className="flex items-baseline gap-2">
+                      <span className="font-medium">Lazy log</span>
+                      <span className="text-muted-foreground">lowers confidence</span>
+                    </span>
+                    <Switch checked={lazy} onCheckedChange={(v) => setLazy(Boolean(v))} />
+                  </label>
+                ) : null}
               </div>
-            </>
+            </div>
           ) : (
             /* Background block — single column inside the wider dialog */
             <section className="grid gap-4">
+              {!editing ? (
+                <div className="inline-flex rounded-lg border p-0.5 w-full">
+                  {([
+                    { v: "event", label: "Event / task" },
+                    { v: "block", label: "Background block" },
+                  ] as const).map((opt) => (
+                    <button
+                      key={opt.v}
+                      type="button"
+                      onClick={() => setMode(opt.v)}
+                      className={cn(
+                        "flex-1 px-3 py-1 text-sm rounded-md transition-colors",
+                        mode === opt.v ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground",
+                      )}
+                    >
+                      {opt.label}
+                    </button>
+                  ))}
+                </div>
+              ) : null}
               <div className="grid sm:grid-cols-2 gap-3">
                 <div className="grid gap-1.5">
                   <Label htmlFor="blk-kind" className="text-xs text-muted-foreground">Kind</Label>
@@ -573,7 +808,9 @@ export function EventFormDialog({ state, onClose }: { state: EventDialogState; o
           )}
         </div>
 
-        <DialogFooter className="px-5 py-3 border-t justify-between">
+        {aiState.phase !== "idle" ? <AiOverlay state={aiState} /> : null}
+
+        <DialogFooter className="m-0 px-5 py-2.5 border-t rounded-b-xl justify-between">
           <div>
             {state.eventId ? (
               <Button variant="ghost" size="sm" onClick={onDelete}>
@@ -582,8 +819,8 @@ export function EventFormDialog({ state, onClose }: { state: EventDialogState; o
             ) : null}
           </div>
           <div className="flex gap-2">
-            <Button variant="ghost" onClick={onClose}>Cancel</Button>
-            <Button onClick={onSave} disabled={saveDisabled}>
+            <Button variant="ghost" size="sm" onClick={onClose}>Cancel</Button>
+            <Button size="sm" onClick={onSave} disabled={saveDisabled}>
               {editing
                 ? "Save changes"
                 : mode === "block"

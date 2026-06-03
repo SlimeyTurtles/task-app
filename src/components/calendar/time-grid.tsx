@@ -1,10 +1,11 @@
 "use client";
 
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
-import { EventKind } from "@prisma/client";
+import { EventKind, TaskStatus } from "@prisma/client";
 
 import { cn } from "@/lib/utils";
 import { formatHour, formatTime, isSameDay, startOfLocalDay } from "@/lib/scheduling";
+import { EventContextMenu } from "@/components/calendar/event-context-menu";
 
 const DAY_MS = 24 * 60 * 60_000;
 const WINDOW_MINUTES = 24 * 60; // full day, fits viewport (no scroll)
@@ -12,11 +13,27 @@ const SNAP = 15;
 const MIN_DURATION_MS = 15 * 60_000;
 const DRAG_THRESHOLD_MIN = 8;
 
+type EventTag = { id: string; name: string; color: string | null };
 type EventTask = {
   id: string;
   name: string;
+  status?: TaskStatus;
   area: { id: string; name: string; color: string | null } | null;
+  tags?: { tag: EventTag }[];
 };
+
+/** True when every attached task is DONE. Drives the strikethrough/fade. */
+export function isEventComplete(ev: { attributions: { task: { status?: TaskStatus } }[] }): boolean {
+  if (ev.attributions.length === 0) return false;
+  return ev.attributions.every((a) => a.task.status === TaskStatus.DONE);
+}
+
+/** Color priority: first tag with a color → area color → primary. */
+function eventColor(task: EventTask | undefined): string {
+  if (!task) return "var(--primary)";
+  const tagColor = task.tags?.find((t) => t.tag.color)?.tag.color;
+  return tagColor ?? task.area?.color ?? "var(--primary)";
+}
 export type GridEvent = {
   id: string;
   title: string | null;
@@ -322,6 +339,7 @@ export function TimeGrid({
               onPointerDownEmpty={(e) => beginCreate(e, dayIndex)}
               onPointerDownEvent={beginMove}
               onPointerDownResize={beginResize}
+              onEditEvent={onEditEvent}
             />
           ))}
         </div>
@@ -342,6 +360,7 @@ function DayColumn({
   onPointerDownEmpty,
   onPointerDownEvent,
   onPointerDownResize,
+  onEditEvent,
 }: {
   day: Date;
   dayIndex: number;
@@ -354,6 +373,7 @@ function DayColumn({
   onPointerDownEmpty: (e: ReactPointerEvent) => void;
   onPointerDownEvent: (e: ReactPointerEvent, ev: GridEvent, dayIndex: number) => void;
   onPointerDownResize: (e: ReactPointerEvent, ev: GridEvent, dayIndex: number) => void;
+  onEditEvent: (eventId: string) => void;
 }) {
   const dayStart = startOfLocalDay(day).getTime();
   const dayEnd = dayStart + DAY_MS;
@@ -392,43 +412,53 @@ function DayColumn({
         const lazy = ev.confidence < 1;
         const titleTask = ev.attributions[0]?.task;
         const label = eventLabel(ev);
-        const color = titleTask?.area?.color ?? "var(--primary)";
+        const color = eventColor(titleTask);
         const widthPct = 100 / lanes;
         const isDragging = draggedEventId === ev.id;
         const multiDay = ev.endsAt.getTime() > dayEnd || ev.startsAt.getTime() < dayStart;
+        const done = isEventComplete(ev);
         return (
-          <div
-            key={ev.id}
-            onPointerDown={(e) => onPointerDownEvent(e, ev, dayIndex)}
-            className={cn(
-              "absolute rounded-md overflow-hidden border text-[0.7rem] cursor-grab active:cursor-grabbing shadow-sm",
-              lazy && "border-dashed",
-              isDragging && "opacity-40",
-            )}
-            style={{
-              top: `${pos.topPct}%`,
-              height: `${pos.heightPct}%`,
-              left: `calc(${lane * widthPct}% + 2px)`,
-              width: `calc(${widthPct}% - 4px)`,
-              backgroundColor: `color-mix(in oklch, ${color} 22%, var(--card))`,
-              borderColor: color,
-            }}
-          >
-            <div className="px-1.5 py-0.5 font-medium leading-tight truncate">{label}</div>
-            <div className="px-1.5 text-[0.62rem] text-muted-foreground tabular-nums truncate">
-              {ev.startsAt.getTime() < dayStart ? "… " : formatTime(ev.startsAt)}
-              {" – "}
-              {ev.endsAt.getTime() > dayEnd ? "…" : formatTime(ev.endsAt)}
-              {multiDay ? " →" : ""}
-            </div>
-            {/* resize handle only on the day the event actually ends */}
-            {ev.endsAt.getTime() <= dayEnd ? (
+          <EventContextMenu key={ev.id} event={ev} onEdit={onEditEvent}>
+            <div
+              onPointerDown={(e) => onPointerDownEvent(e, ev, dayIndex)}
+              className={cn(
+                "absolute rounded-md overflow-hidden border text-[0.7rem] cursor-grab active:cursor-grabbing shadow-sm",
+                lazy && "border-dashed",
+                isDragging && "opacity-40",
+                done && "opacity-60",
+              )}
+              style={{
+                top: `${pos.topPct}%`,
+                height: `${pos.heightPct}%`,
+                left: `calc(${lane * widthPct}% + 2px)`,
+                width: `calc(${widthPct}% - 4px)`,
+                backgroundColor: `color-mix(in oklch, ${color} 22%, var(--card))`,
+                borderColor: color,
+              }}
+            >
               <div
-                onPointerDown={(e) => onPointerDownResize(e, ev, dayIndex)}
-                className="absolute bottom-0 left-0 right-0 h-2 cursor-ns-resize"
-              />
-            ) : null}
-          </div>
+                className={cn(
+                  "px-1.5 py-0.5 font-medium leading-tight truncate",
+                  done && "line-through decoration-foreground/60",
+                )}
+              >
+                {label}
+              </div>
+              <div className="px-1.5 text-[0.62rem] text-muted-foreground tabular-nums truncate">
+                {ev.startsAt.getTime() < dayStart ? "… " : formatTime(ev.startsAt)}
+                {" – "}
+                {ev.endsAt.getTime() > dayEnd ? "…" : formatTime(ev.endsAt)}
+                {multiDay ? " →" : ""}
+              </div>
+              {/* resize handle only on the day the event actually ends */}
+              {ev.endsAt.getTime() <= dayEnd ? (
+                <div
+                  onPointerDown={(e) => onPointerDownResize(e, ev, dayIndex)}
+                  className="absolute bottom-0 left-0 right-0 h-2 cursor-ns-resize"
+                />
+              ) : null}
+            </div>
+          </EventContextMenu>
         );
       })}
 

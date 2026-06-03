@@ -26,34 +26,31 @@ export function CalendarClient() {
   const [dialog, setDialog] = useState<EventDialogState>({ open: false });
   const [planOpen, setPlanOpen] = useState(false);
 
-  // Persist {view, hourHeight} to localStorage so navigating away and back
-  // remembers the configuration. Read deferred to avoid hydration mismatch;
-  // `hydrated` is a state (not a ref) so the write effect only fires AFTER the
-  // read's setStates have been applied — otherwise the write effect runs in
-  // the same commit as the read and overwrites localStorage with the still-
-  // default values before the saved ones land.
-  const [hydrated, setHydrated] = useState(false);
+  // Persist {view, hourHeight} to the user's DB-backed settings so the
+  // configuration follows them across devices and server restarts. `loaded`
+  // gates the write effect so it only fires AFTER the query's setStates have
+  // been applied — otherwise the write would run in the same commit as the
+  // read and clobber the saved values with the still-default ones.
+  const [loaded, setLoaded] = useState(false);
+  const settingsQuery = trpc.settings.get.useQuery();
+  const updateSettings = trpc.settings.update.useMutation();
   useEffect(() => {
-    try {
-      const raw = localStorage.getItem("calendarView");
-      if (raw) {
-        const parsed = JSON.parse(raw) as { view?: CalendarView; hourHeight?: number };
-        if (parsed.view) setViewState(parsed.view);
-        if (typeof parsed.hourHeight === "number") setHourHeight(parsed.hourHeight);
-      }
-    } catch {
-      // ignore malformed storage
-    }
-    setHydrated(true);
-  }, []);
+    if (loaded || !settingsQuery.data) return;
+    const cal = settingsQuery.data.calendar;
+    if (cal?.view) setViewState(cal.view);
+    if (typeof cal?.hourHeight === "number") setHourHeight(cal.hourHeight);
+    setLoaded(true);
+  }, [loaded, settingsQuery.data]);
   useEffect(() => {
-    if (!hydrated) return;
-    try {
-      localStorage.setItem("calendarView", JSON.stringify({ view, hourHeight }));
-    } catch {
-      // storage may be unavailable
-    }
-  }, [view, hourHeight, hydrated]);
+    if (!loaded) return;
+    // Debounce so dragging the hour-height slider doesn't fire a mutation per step.
+    const t = setTimeout(() => {
+      updateSettings.mutate({ calendar: { view, hourHeight } });
+    }, 400);
+    return () => clearTimeout(t);
+    // updateSettings is a stable mutation handle from tRPC
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [view, hourHeight, loaded]);
 
   function setView(v: CalendarView) {
     setViewState(v);

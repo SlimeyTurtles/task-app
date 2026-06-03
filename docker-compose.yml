@@ -1,6 +1,6 @@
 services:
   postgres:
-    image: postgres:15-alpine
+    image: postgres:16-alpine
     container_name: task-app-postgres
     restart: unless-stopped
     environment:
@@ -30,6 +30,38 @@ services:
       interval: 5s
       timeout: 5s
       retries: 5
+
+  web:
+    build: .
+    container_name: task-app-web
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      # Inside the docker network we talk to the services by name, not the
+      # host-mapped port. DATABASE_URL/REDIS_URL here override the dev defaults.
+      DATABASE_URL: postgresql://${POSTGRES_USER:-taskapp}:${POSTGRES_PASSWORD:-taskapp}@postgres:5432/${POSTGRES_DB:-taskapp}?schema=public
+      REDIS_URL: redis://redis:6379
+      NEXTAUTH_SECRET: ${NEXTAUTH_SECRET:?NEXTAUTH_SECRET is required}
+      NEXTAUTH_URL: ${NEXTAUTH_URL:-http://localhost:3002}
+      CLAUDE_API_KEY: ${CLAUDE_API_KEY}
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
+    ports:
+      - "${WEB_PORT:-3002}:3000"
+    # First boot: bring an empty volume up to schema, then start the
+    # standalone server. `prisma db push` is idempotent on subsequent boots.
+    command: >
+      sh -c "prisma db push --skip-generate &&
+             node server.js"
+
+  # The bullmq calibration worker isn't bundled into the standalone output
+  # (it has its own entrypoint in src/worker/index.ts). Skipped for v1 of the
+  # deploy — calibration is a nightly nice-to-have, not required for the UI.
+  # Add a separate Dockerfile target + service here when you want it.
 
 volumes:
   postgres_data:

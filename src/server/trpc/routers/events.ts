@@ -4,6 +4,7 @@ import { z } from "zod";
 
 import { protectedProcedure, router } from "../init";
 import { addDays, startOfLocalDay } from "@/lib/scheduling";
+import { inferTaskMetadata } from "@/server/lib/ai-infer-task";
 
 const AttributionInput = z.object({
   taskId: z.string(),
@@ -59,6 +60,7 @@ export const eventsRouter = router({
               select: {
                 id: true,
                 name: true,
+                status: true,
                 stress: true,
                 exhaustion: true,
                 estimatedMinutes: true,
@@ -77,7 +79,26 @@ export const eventsRouter = router({
     const event = await ctx.db.event.findFirst({
       where: { id: input.id, userId: ctx.session.user.id },
       include: {
-        attributions: { include: { task: true } },
+        attributions: {
+          include: {
+            task: {
+              select: {
+                id: true,
+                name: true,
+                status: true,
+                stress: true,
+                exhaustion: true,
+                estimatedMinutes: true,
+                importance: true,
+                urgency: true,
+                dueDate: true,
+                area: { select: { id: true, name: true, color: true } },
+                project: { select: { id: true, name: true } },
+                tags: { include: { tag: { select: { id: true, name: true, color: true } } } },
+              },
+            },
+          },
+        },
       },
     });
     if (!event) throw new TRPCError({ code: "NOT_FOUND" });
@@ -263,54 +284,143 @@ export const eventsRouter = router({
         estimatedMinutes: z.number().int().min(5).max(12 * 60).nullish(),
         stress: z.number().int().min(0).max(10).nullish(),
         exhaustion: z.number().int().min(0).max(10).nullish(),
+        importance: z.number().int().min(0).max(10).nullish(),
+        urgency: z.number().int().min(0).max(10).nullish(),
+        dueDate: z.date().nullish(),
         attachTaskId: z.string().nullish(),
+        createTask: z.boolean().default(true),
+        tagIds: z.array(z.string()).optional(),
+        // Optional manual schedule. If both provided, use them verbatim
+        // instead of finding a free slot. Lets "Pick a time" reuse this path
+        // (and benefit from AI inference) without a second mutation.
+        startsAt: z.date().nullish(),
+        endsAt: z.date().nullish(),
+        lazy: z.boolean().default(false),
       }),
     )
     .mutation(async ({ ctx, input }) => {
       const userId = ctx.session.user.id;
-      const durationMin = Math.min(12 * 60, Math.max(15, input.estimatedMinutes ?? 60));
+
+      // Validate any tag ids belong to this user.
+      if (input.tagIds?.length) {
+        const count = await ctx.db.tag.count({
+          where: { id: { in: input.tagIds }, userId },
+        });
+        if (count !== input.tagIds.length) {
+          throw new TRPCError({ code: "BAD_REQUEST", message: "One or more tags not found." });
+        }
+      }
+
+      // Load the user's tag library so Claude can suggest tags too — only when
+      // the user didn't already pick any.
+      const availableTags = input.tagIds?.length
+        ? undefined
+        : await ctx.db.tag.findMany({
+            where: { userId },
+            select: { id: true, name: true, description: true },
+          });
+
+      // Let Claude fill in any of {estimatedMinutes, stress, exhaustion,
+      // importance, urgency, tagIds} the user left blank — using the title +
+      // description + tag catalog. Skips fields the user explicitly set;
+      // no-ops if no CLAUDE_API_KEY is configured.
+      const inferred = await inferTaskMetadata({
+        title: input.title,
+        description: input.description ?? null,
+        provided: {
+          estimatedMinutes: input.estimatedMinutes ?? null,
+          stress: input.stress ?? null,
+          exhaustion: input.exhaustion ?? null,
+          importance: input.importance ?? null,
+          urgency: input.urgency ?? null,
+          tagIds: input.tagIds,
+        },
+        availableTags,
+      });
+
+      const estimatedMinutes = input.estimatedMinutes ?? inferred.estimatedMinutes ?? null;
+      const stress = input.stress ?? inferred.stress ?? null;
+      const exhaustion = input.exhaustion ?? inferred.exhaustion ?? null;
+      const importance = input.importance ?? inferred.importance ?? null;
+      const urgency = input.urgency ?? inferred.urgency ?? null;
+      // Caller's explicit tagIds win; otherwise use Claude's suggestion (may be empty).
+      const tagIds = input.tagIds ?? inferred.tagIds ?? [];
+
+      const durationMin = Math.min(12 * 60, Math.max(15, estimatedMinutes ?? 60));
 
       let taskId = input.attachTaskId ?? null;
       if (taskId) {
         await assertTasksOwned(ctx, [taskId]);
-      } else {
+        if (tagIds.length) {
+          await ctx.db.taskTag.createMany({
+            data: tagIds.map((tagId) => ({ taskId: taskId!, tagId })),
+            skipDuplicates: true,
+          });
+        }
+      } else if (input.createTask) {
         const task = await ctx.db.task.create({
           data: {
             userId,
             name: input.title,
             description: input.description ?? null,
-            estimatedMinutes: input.estimatedMinutes ?? null,
-            stress: input.stress ?? null,
-            exhaustion: input.exhaustion ?? null,
+            estimatedMinutes,
+            stress,
+            exhaustion,
+            importance,
+            urgency,
+            dueDate: input.dueDate ?? null,
             status: TaskStatus.SCHEDULED,
+            ...(tagIds.length
+              ? { tags: { create: tagIds.map((tagId) => ({ tagId })) } }
+              : {}),
           },
         });
         taskId = task.id;
       }
 
-      const now = new Date();
-      const horizonEnd = new Date(now.getTime() + 21 * 86_400_000);
-      const busy = await ctx.db.event.findMany({
-        where: {
-          userId,
-          kind: EventKind.ACTIVE,
-          AND: [{ startsAt: { lt: horizonEnd } }, { endsAt: { gt: now } }],
-        },
-        select: { startsAt: true, endsAt: true },
-      });
-      const { start, end } = findFreeSlot(now, durationMin, busy);
+      let start: Date;
+      let end: Date;
+      let source: EventSource;
+      if (input.startsAt && input.endsAt) {
+        if (input.endsAt <= input.startsAt) {
+          throw new TRPCError({ code: "BAD_REQUEST", message: "End must be after start." });
+        }
+        start = input.startsAt;
+        end = input.endsAt;
+        source = EventSource.MANUAL;
+      } else {
+        const now = new Date();
+        const horizonEnd = new Date(now.getTime() + 21 * 86_400_000);
+        const busy = await ctx.db.event.findMany({
+          where: {
+            userId,
+            kind: EventKind.ACTIVE,
+            AND: [{ startsAt: { lt: horizonEnd } }, { endsAt: { gt: now } }],
+          },
+          select: { startsAt: true, endsAt: true },
+        });
+        const slot = findFreeSlot(now, durationMin, busy);
+        start = slot.start;
+        end = slot.end;
+        source = EventSource.SUGGESTED;
+      }
 
-      return ctx.db.event.create({
+      const event = await ctx.db.event.create({
         data: {
           userId,
+          title: input.title,
           startsAt: start,
           endsAt: end,
           kind: EventKind.ACTIVE,
-          source: EventSource.SUGGESTED,
-          confidence: 1,
-          attributions: { create: { taskId, weight: 1, ratioUnknown: false } },
+          source,
+          confidence: input.lazy ? 0.3 : 1,
+          ...(taskId
+            ? { attributions: { create: { taskId, weight: 1, ratioUnknown: false } } }
+            : {}),
         },
       });
+
+      return { event, inferred, taskId };
     }),
 });
 

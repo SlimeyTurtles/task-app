@@ -49,6 +49,12 @@ export function TagPicker({
                   const t = tagsById.get(id);
                   return (
                     <Badge key={id} variant="secondary" className="gap-1">
+                      {t?.color ? (
+                        <span
+                          className="size-2 rounded-full shrink-0"
+                          style={{ backgroundColor: t.color }}
+                        />
+                      ) : null}
                       {t?.name ?? id}
                       <span
                         role="button"
@@ -90,6 +96,12 @@ export function TagPicker({
                 )}
               >
                 <Checkbox checked={value.includes(tag.id)} onCheckedChange={() => toggle(tag.id)} />
+                {tag.color ? (
+                  <span
+                    className="size-2.5 rounded-full shrink-0"
+                    style={{ backgroundColor: tag.color }}
+                  />
+                ) : null}
                 <span className="truncate flex-1">{tag.name}</span>
               </label>
             ))

@@ -40,7 +40,10 @@ export default function RootLayout({
       suppressHydrationWarning
       className={`${fraunces.variable} ${hanken.variable} ${geistMono.variable} h-full antialiased`}
     >
-      <body className="h-svh overflow-hidden flex flex-col bg-background text-foreground">
+      <body
+        className="h-svh overflow-hidden flex flex-col bg-background text-foreground"
+        suppressHydrationWarning
+      >
         <Providers>{children}</Providers>
         <Toaster />
       </body>

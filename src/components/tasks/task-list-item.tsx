@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { CalendarPlus, Check, MoreHorizontal, RotateCcw, Share2, Trash2, Undo2 } from "lucide-react";
+import { CalendarPlus, Check, MoreHorizontal, RotateCcw, Share2, Sparkles, Trash2, Undo2 } from "lucide-react";
 import { TaskStatus } from "@prisma/client";
 import { toast } from "sonner";
 
@@ -52,6 +52,20 @@ export function TaskListItem({
     onSuccess: () => {
       void utils.tasks.list.invalidate();
     },
+  });
+  const aiSchedule = trpc.tasks.aiSchedule.useMutation({
+    onSuccess: (r) => {
+      void utils.tasks.list.invalidate();
+      void utils.events.list.invalidate();
+      const newTitle = r.task.name !== task.name ? ` as "${r.task.name}"` : "";
+      const when = new Date(r.event.startsAt).toLocaleString(undefined, {
+        weekday: "short",
+        hour: "numeric",
+        minute: "2-digit",
+      });
+      toast.success(`Scheduled${newTitle} for ${when}.`);
+    },
+    onError: (e) => toast.error(e.message),
   });
   const dropOnCalendar = trpc.events.dropOnCalendar.useMutation({
     onSuccess: () => {
@@ -179,16 +193,25 @@ export function TaskListItem({
             </DropdownMenuItem>
           )}
           {!done && !dropped ? (
-            <DropdownMenuItem
-              onClick={() =>
-                dropOnCalendar.mutate({
-                  taskId: task.id,
-                  estimatedMinutes: task.estimatedMinutes ?? undefined,
-                })
-              }
-            >
-              <CalendarPlus className="size-4 mr-2" /> Drop on calendar
-            </DropdownMenuItem>
+            <>
+              <DropdownMenuItem
+                onClick={() => aiSchedule.mutate({ id: task.id })}
+                disabled={aiSchedule.isPending}
+              >
+                <Sparkles className="size-4 mr-2" />
+                {aiSchedule.isPending ? "AI scheduling…" : "AI schedule"}
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                onClick={() =>
+                  dropOnCalendar.mutate({
+                    taskId: task.id,
+                    estimatedMinutes: task.estimatedMinutes ?? undefined,
+                  })
+                }
+              >
+                <CalendarPlus className="size-4 mr-2" /> Drop on calendar
+              </DropdownMenuItem>
+            </>
           ) : null}
           {!dropped ? (
             <DropdownMenuItem onClick={() => setStatus(TaskStatus.DROPPED)}>

@@ -1,9 +1,11 @@
 import { TRPCError } from "@trpc/server";
-import { DependencyKind, TaskStatus, type Prisma } from "@prisma/client";
+import { DependencyKind, EventKind, EventSource, TaskStatus, type Prisma } from "@prisma/client";
 import { z } from "zod";
 
 import { protectedProcedure, router } from "../init";
 import { getTaskAccess, canRead, canWrite } from "@/server/lib/access";
+import { inferTaskMetadata } from "@/server/lib/ai-infer-task";
+import { findFreeSlot } from "./events";
 
 const StressInt = z.number().int().min(0).max(10);
 const ValenceInt = z.number().int().min(-5).max(5);
@@ -281,6 +283,115 @@ export const tasksRouter = router({
           },
         });
       });
+    }),
+
+  /**
+   * Take a rough inbox task ("notes-on-a-napkin"), have Claude rewrite its
+   * title + description, fill in any blank metadata, suggest tags, and drop
+   * it onto the next free slot. One-button "turn this into a real, scheduled
+   * task." Only fields the user left blank get overwritten — explicit values
+   * are preserved.
+   */
+  aiSchedule: protectedProcedure
+    .input(z.object({ id: z.string() }))
+    .mutation(async ({ ctx, input }) => {
+      const userId = ctx.session.user.id;
+      const task = await ctx.db.task.findFirst({
+        where: { id: input.id, userId },
+        include: { tags: { select: { tagId: true } } },
+      });
+      if (!task) throw new TRPCError({ code: "NOT_FOUND", message: "Task not found." });
+
+      // Load the user's tag library so the AI can suggest tags from it.
+      // Skip if the task already has tags — respect the user's curation.
+      const availableTags = task.tags.length
+        ? undefined
+        : await ctx.db.tag.findMany({
+            where: { userId },
+            select: { id: true, name: true, description: true },
+          });
+
+      const inferred = await inferTaskMetadata({
+        title: task.name,
+        description: task.description,
+        provided: {
+          estimatedMinutes: task.estimatedMinutes,
+          stress: task.stress,
+          exhaustion: task.exhaustion,
+          importance: task.importance,
+          urgency: task.urgency,
+          tagIds: task.tags.length ? task.tags.map((t) => t.tagId) : undefined,
+        },
+        availableTags,
+        enhanceText: true,
+      });
+
+      // Apply only what came back — leave user-set values alone.
+      const newName = inferred.improvedTitle ?? task.name;
+      const newDescription = inferred.improvedDescription ?? task.description;
+      const estimatedMinutes = task.estimatedMinutes ?? inferred.estimatedMinutes ?? null;
+      const stress = task.stress ?? inferred.stress ?? null;
+      const exhaustion = task.exhaustion ?? inferred.exhaustion ?? null;
+      const importance = task.importance ?? inferred.importance ?? null;
+      const urgency = task.urgency ?? inferred.urgency ?? null;
+      const newTagIds = inferred.tagIds ?? [];
+
+      const durationMin = Math.min(12 * 60, Math.max(15, estimatedMinutes ?? 60));
+
+      // Find a free slot now so we have a place to put it.
+      const now = new Date();
+      const horizonEnd = new Date(now.getTime() + 21 * 86_400_000);
+      const busy = await ctx.db.event.findMany({
+        where: {
+          userId,
+          kind: EventKind.ACTIVE,
+          AND: [{ startsAt: { lt: horizonEnd } }, { endsAt: { gt: now } }],
+        },
+        select: { startsAt: true, endsAt: true },
+      });
+      const slot = findFreeSlot(now, durationMin, busy);
+
+      // One transaction: update the task, attach any new tags, mark it
+      // SCHEDULED, and create the event linked to it.
+      const result = await ctx.db.$transaction(async (tx) => {
+        const updatedTask = await tx.task.update({
+          where: { id: task.id },
+          data: {
+            name: newName,
+            description: newDescription,
+            estimatedMinutes,
+            stress,
+            exhaustion,
+            importance,
+            urgency,
+            status: TaskStatus.SCHEDULED,
+          },
+        });
+
+        if (newTagIds.length && task.tags.length === 0) {
+          await tx.taskTag.createMany({
+            data: newTagIds.map((tagId) => ({ taskId: task.id, tagId })),
+            skipDuplicates: true,
+          });
+        }
+
+        const event = await tx.event.create({
+          data: {
+            userId,
+            title: newName,
+            startsAt: slot.start,
+            endsAt: slot.end,
+            kind: EventKind.ACTIVE,
+            source: EventSource.SUGGESTED,
+            confidence: 1,
+            attributions: { create: { taskId: task.id, weight: 1, ratioUnknown: false } },
+          },
+        });
+
+        return { task: updatedTask, event };
+      });
+
+      return { ...result, inferred };
     }),
 });
 

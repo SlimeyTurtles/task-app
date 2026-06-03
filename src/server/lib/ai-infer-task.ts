@@ -22,6 +22,8 @@ export type InferableTaskFields = {
   importance: number | null;
   urgency: number | null;
   tagIds: string[];
+  improvedTitle: string | null;
+  improvedDescription: string | null;
 };
 
 export type AvailableTag = { id: string; name: string; description: string | null };
@@ -30,9 +32,15 @@ export type InferTaskInput = {
   title: string;
   description: string | null;
   // Pass through any fields the user already filled — Claude won't overwrite them.
-  provided: Partial<Omit<InferableTaskFields, "tagIds">> & { tagIds?: string[] };
+  provided: Partial<Omit<InferableTaskFields, "tagIds" | "improvedTitle" | "improvedDescription">> & {
+    tagIds?: string[];
+  };
   // The user's tag library. Claude picks zero or more that apply.
   availableTags?: AvailableTag[];
+  // When true, Claude is told the title and description are rough notes from
+  // an inbox capture — it should rewrite both into a clearer task. When
+  // false (or unset), it leaves them alone (returns identical strings).
+  enhanceText?: boolean;
 };
 
 const SYSTEM_PROMPT = `You estimate task metadata for a personal task planner.
@@ -48,6 +56,11 @@ Given a task title and optional description, output integer estimates for:
 And select tags:
 
 - tagIds: an array of zero or more tag IDs from the user's library that clearly apply to this task. Be precise — only tag when the task obviously fits. If no tag clearly applies, return an empty array. Never invent tag IDs that weren't given to you.
+
+And produce text:
+
+- improvedTitle: A clear, concrete task title in imperative form ("Draft Q3 board deck" not "Q3 board deck"). If the caller flagged the text as rough/inbox notes, rewrite freely for clarity. Otherwise return the input title verbatim — don't second-guess a deliberate title.
+- improvedDescription: A 1-3 sentence description that's actionable: what to produce, key constraints. If the input description is rough notes, rewrite for clarity. If it's empty, infer something plausible from the title. If it's already clear, return it verbatim. Never invent specifics (names, deadlines, numbers) that weren't in the input.
 
 Guidelines:
 - Be conservative on stress/exhaustion (use 3-6 for typical tasks).
@@ -68,8 +81,19 @@ const RESPONSE_SCHEMA = {
     importance: { type: "integer" },
     urgency: { type: "integer" },
     tagIds: { type: "array", items: { type: "string" } },
+    improvedTitle: { type: "string" },
+    improvedDescription: { type: "string" },
   },
-  required: ["estimatedMinutes", "stress", "exhaustion", "importance", "urgency", "tagIds"],
+  required: [
+    "estimatedMinutes",
+    "stress",
+    "exhaustion",
+    "importance",
+    "urgency",
+    "tagIds",
+    "improvedTitle",
+    "improvedDescription",
+  ],
   additionalProperties: false,
 } as const;
 
@@ -78,7 +102,8 @@ function clampInt(v: unknown, min: number, max: number): number | null {
   return Math.max(min, Math.min(max, Math.round(v)));
 }
 
-const NUMERIC_BOUNDS: Record<keyof Omit<InferableTaskFields, "tagIds">, [number, number]> = {
+type NumericFieldKey = "estimatedMinutes" | "stress" | "exhaustion" | "importance" | "urgency";
+const NUMERIC_BOUNDS: Record<NumericFieldKey, [number, number]> = {
   estimatedMinutes: [5, 720],
   stress: [0, 10],
   exhaustion: [0, 10],
@@ -102,13 +127,14 @@ export async function inferTaskMetadata(input: InferTaskInput): Promise<Partial<
   const numericKeys = Object.keys(NUMERIC_BOUNDS) as (keyof typeof NUMERIC_BOUNDS)[];
   const missingNumeric = numericKeys.filter((k) => input.provided[k] == null);
   const wantsTags = input.provided.tagIds == null && (input.availableTags?.length ?? 0) > 0;
+  const wantsText = input.enhanceText === true;
 
-  if (missingNumeric.length === 0 && !wantsTags) {
+  if (missingNumeric.length === 0 && !wantsTags && !wantsText) {
     console.log("[ai-infer-task] all fields provided — skipping inference");
     return {};
   }
   console.log(
-    `[ai-infer-task] inferring ${missingNumeric.join(", ")}${wantsTags ? " + tags" : ""} for "${input.title}"`,
+    `[ai-infer-task] inferring ${missingNumeric.join(", ")}${wantsTags ? " + tags" : ""}${wantsText ? " + text" : ""} for "${input.title}"`,
   );
 
   const providedSummary = Object.entries(input.provided)
@@ -123,12 +149,17 @@ export async function inferTaskMetadata(input: InferTaskInput): Promise<Partial<
         .join("\n")
     : "Available tags: (none — return tagIds: [])";
 
+  const textInstruction = wantsText
+    ? "TEXT IS ROUGH INBOX NOTES — rewrite improvedTitle and improvedDescription for clarity and action."
+    : "TEXT IS DELIBERATE — return improvedTitle and improvedDescription identical to the input.";
+
   const userText = [
     `Title: ${input.title}`,
     input.description ? `Description: ${input.description}` : "Description: (none)",
     providedSummary ? `User already set: ${providedSummary}. Match these — don't contradict.` : "",
     tagCatalog,
-    `Output JSON with all 6 fields. The caller will keep only the ones the user left blank.`,
+    textInstruction,
+    `Output JSON with all 8 fields. The caller will keep only the ones the user left blank.`,
   ]
     .filter(Boolean)
     .join("\n");
@@ -169,6 +200,14 @@ export async function inferTaskMetadata(input: InferTaskInput): Promise<Partial<
       const tagIds = (parsed.tagIds as unknown[])
         .filter((x): x is string => typeof x === "string" && validIds.has(x));
       if (tagIds.length > 0) result.tagIds = tagIds;
+    }
+    if (wantsText) {
+      if (typeof parsed.improvedTitle === "string" && parsed.improvedTitle.trim()) {
+        result.improvedTitle = parsed.improvedTitle.trim().slice(0, 300);
+      }
+      if (typeof parsed.improvedDescription === "string" && parsed.improvedDescription.trim()) {
+        result.improvedDescription = parsed.improvedDescription.trim().slice(0, 2000);
+      }
     }
     console.log("[ai-infer-task] inferred:", result);
     return result;

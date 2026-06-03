@@ -429,7 +429,7 @@ const WORK_END_HOUR = 22;
 const SLOT_STEP_MIN = 15;
 
 /** First gap of `durationMin` in working hours (8 AM–10 PM) over the next 3 weeks that no ACTIVE event occupies. */
-function findFreeSlot(
+export function findFreeSlot(
   now: Date,
   durationMin: number,
   busy: { startsAt: Date; endsAt: Date }[],

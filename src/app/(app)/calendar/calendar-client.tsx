@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { ChevronLeft, ChevronRight, Plus, Sparkles } from "lucide-react";
 import { toast } from "sonner";
 
@@ -33,7 +33,9 @@ export function CalendarClient() {
   // read and clobber the saved values with the still-default ones.
   const [loaded, setLoaded] = useState(false);
   const settingsQuery = trpc.settings.get.useQuery();
-  const updateSettings = trpc.settings.update.useMutation();
+  const updateSettings = trpc.settings.update.useMutation({
+    onError: (e) => toast.error(`Couldn't save settings: ${e.message}`),
+  });
   useEffect(() => {
     if (loaded || !settingsQuery.data) return;
     const cal = settingsQuery.data.calendar;
@@ -41,16 +43,58 @@ export function CalendarClient() {
     if (typeof cal?.hourHeight === "number") setHourHeight(cal.hourHeight);
     setLoaded(true);
   }, [loaded, settingsQuery.data]);
+
+  // Latest local state in a ref, so the pagehide handler can read it without
+  // re-binding on every change.
+  const latestRef = useRef({ view, hourHeight });
+  latestRef.current = { view, hourHeight };
+
   useEffect(() => {
     if (!loaded) return;
     // Debounce so dragging the hour-height slider doesn't fire a mutation per step.
     const t = setTimeout(() => {
       updateSettings.mutate({ calendar: { view, hourHeight } });
-    }, 400);
+    }, 250);
     return () => clearTimeout(t);
     // updateSettings is a stable mutation handle from tRPC
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [view, hourHeight, loaded]);
+
+  // Flush any pending change immediately on tab hide / refresh / nav-away.
+  // Without this, a quick refresh after a change would cancel the 250ms
+  // debounce and lose the write. We can't await fetch from a pagehide
+  // handler, but `keepalive: true` lets the request finish in the background
+  // after the page is gone — which is exactly what we want here.
+  useEffect(() => {
+    if (!loaded) return;
+    function flush() {
+      // tRPC v11 batch wire format: POST /api/trpc/<proc>?batch=1 with body
+      // {"0": {"json": INPUT}}. keepalive lets the request complete after
+      // the page is gone — exactly the case we want to cover here.
+      const body = JSON.stringify({
+        0: { json: { calendar: latestRef.current } },
+      });
+      try {
+        fetch("/api/trpc/settings.update?batch=1", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body,
+          keepalive: true,
+        }).catch(() => {});
+      } catch {
+        // ignore — best-effort
+      }
+    }
+    function onHide() {
+      if (document.visibilityState === "hidden") flush();
+    }
+    window.addEventListener("pagehide", flush);
+    document.addEventListener("visibilitychange", onHide);
+    return () => {
+      window.removeEventListener("pagehide", flush);
+      document.removeEventListener("visibilitychange", onHide);
+    };
+  }, [loaded]);
 
   function setView(v: CalendarView) {
     setViewState(v);

@@ -15,6 +15,11 @@ datasource db {
 // 1) Users & Sharing
 // ----------------------------------------------------------------------------
 
+enum UserRole {
+  USER
+  ADMIN
+}
+
 model User {
   id            String    @id @default(cuid())
   email         String    @unique
@@ -22,6 +27,7 @@ model User {
   image         String?
   emailVerified DateTime?
   passwordHash  String?
+  role          UserRole  @default(USER)
   settings      Json      @default("{}")
   lastLoginAt   DateTime?
   createdAt     DateTime  @default(now())
@@ -45,6 +51,30 @@ model User {
   inboundTaskShares  TaskShare[] @relation("TaskShareGrantee")
   outboundTagShares  TagShare[]  @relation("TagShareOwner")
   inboundTagShares   TagShare[]  @relation("TagShareGrantee")
+
+  invitesCreated   Invite[] @relation("InvitesCreated")
+  inviteRedeemed   Invite[] @relation("InviteUsed")
+}
+
+// Signup is gated: an unused, unexpired Invite token is required to create
+// an account. Admins issue them by sharing the redeem URL with a recipient.
+model Invite {
+  id          String    @id @default(cuid())
+  code        String    @unique
+  email       String?   // optional: when set, signup must match this email
+  note        String?   // free-form label for the admin, e.g. "for Sarah"
+  expiresAt   DateTime?
+
+  createdById String
+  createdAt   DateTime  @default(now())
+
+  usedAt      DateTime?
+  usedById    String?   @unique
+
+  createdBy User  @relation("InvitesCreated", fields: [createdById], references: [id], onDelete: Cascade)
+  usedBy    User? @relation("InviteUsed",    fields: [usedById],    references: [id], onDelete: SetNull)
+
+  @@index([createdById])
 }
 
 // NextAuth adapter tables

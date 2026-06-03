@@ -1,7 +1,8 @@
 "use client";
 
 import { signOut, useSession } from "next-auth/react";
-import { LogOut } from "lucide-react";
+import { LogOut, Mail } from "lucide-react";
+import Link from "next/link";
 
 import {
   DropdownMenu,
@@ -17,6 +18,7 @@ export function UserMenu() {
   const { data: session } = useSession();
   const name = session?.user?.name ?? session?.user?.email ?? "User";
   const initials = (name.match(/\b\w/g) ?? ["U"]).slice(0, 2).join("").toUpperCase();
+  const isAdmin = (session?.user as { role?: string } | undefined)?.role === "ADMIN";
 
   return (
     <DropdownMenu>
@@ -37,6 +39,12 @@ export function UserMenu() {
           ) : null}
         </div>
         <DropdownMenuSeparator />
+        {isAdmin ? (
+          <DropdownMenuItem render={<Link href="/invites" />}>
+            <Mail className="mr-2 size-4" />
+            Invites
+          </DropdownMenuItem>
+        ) : null}
         <DropdownMenuItem onClick={() => signOut({ callbackUrl: "/login" })}>
           <LogOut className="mr-2 size-4" />
           Sign out

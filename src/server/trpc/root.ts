@@ -3,6 +3,7 @@ import { areasRouter } from "./routers/areas";
 import { calibrationRouter } from "./routers/calibration";
 import { capacityRouter } from "./routers/capacity";
 import { eventsRouter } from "./routers/events";
+import { invitesRouter } from "./routers/invites";
 import { metricsRouter } from "./routers/metrics";
 import { projectsRouter } from "./routers/projects";
 import { recommendationsRouter } from "./routers/recommendations";
@@ -26,6 +27,7 @@ export const appRouter = router({
   metrics: metricsRouter,
   sharing: sharingRouter,
   settings: settingsRouter,
+  invites: invitesRouter,
 });
 
 export type AppRouter = typeof appRouter;

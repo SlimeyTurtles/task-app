@@ -116,14 +116,48 @@ export function WikiClient({ slug }: { slug?: string }) {
   );
 }
 
+// Playful landing copy that swaps every ~9 seconds. Initial render uses
+// index 0 (deterministic for SSR), then on mount we jump to a random
+// one and start the interval — that way every visit feels fresh without
+// causing a hydration mismatch.
+const LANDING_TAGLINES = [
+  "Your brain, but with a search box.",
+  "A diary that pulls its weight.",
+  "The part of your memory that doesn't get drunk.",
+  "Like writing things on your hand, but more dignified.",
+  "External RAM for the squishy biological machine.",
+  "For all the stuff you say “hold on, I know this” about.",
+  "It's a wiki. About you. Mostly written by a robot.",
+  "Where “I told you this last Tuesday” becomes provable.",
+  "An external hard drive for your gut feelings.",
+  "The thing you wish you had during your last 1-on-1.",
+  "It's a journal, except other people might read it. (Just kidding. Just the AI.)",
+];
+
 function Landing() {
+  const [i, setI] = useState(0);
+  useEffect(() => {
+    setI(Math.floor(Math.random() * LANDING_TAGLINES.length));
+    const id = setInterval(
+      () => setI((x) => (x + 1 + Math.floor(Math.random() * (LANDING_TAGLINES.length - 1))) % LANDING_TAGLINES.length),
+      9_000,
+    );
+    return () => clearInterval(id);
+  }, []);
+
   return (
     <div className="p-10 max-w-2xl">
-      <h1 className="font-heading text-3xl tracking-tight">Second brain</h1>
+      {/* Key on the heading triggers a re-mount + fade-in on each swap. */}
+      <h1
+        key={i}
+        className="font-heading text-3xl tracking-tight animate-in fade-in-0 duration-700"
+      >
+        {LANDING_TAGLINES[i]}
+      </h1>
       <p className="text-sm text-muted-foreground mt-2 max-w-md">
-        A wiki the AI reads when it's making decisions on your behalf, and writes to
-        when it learns something. Pick <strong>Profile</strong> to start (the always-on
-        doc about you), or create a page for a person, project, or anything else.
+        Profile is the always-on doc. Pages can be anything — people, projects,
+        your cat, that one running gag. <code className="font-mono bg-muted px-1 rounded">[[Wikilinks]]</code>
+        {" "}connect them. Clicking a link to a page that doesn't exist yet creates it.
       </p>
       <div className="mt-6 flex items-center gap-2">
         <Link
@@ -139,10 +173,6 @@ function Landing() {
           <NotebookText className="size-4" /> Browse memories
         </Link>
       </div>
-      <p className="text-xs text-muted-foreground mt-6 max-w-md">
-        Use <code className="font-mono bg-muted px-1 rounded">[[Wikilinks]]</code> to
-        connect pages. Clicking a link to a page that doesn't exist yet creates it.
-      </p>
     </div>
   );
 }

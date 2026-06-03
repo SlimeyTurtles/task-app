@@ -1,4 +1,5 @@
 import {
+  BookText,
   CalendarDays,
   Inbox,
   Folders,
@@ -50,6 +51,7 @@ export const NAV: NavSection[] = [
       { href: "/recurring", label: "Recurring", icon: Repeat, phase: 8 },
       { href: "/someday", label: "Someday", icon: Sparkles, phase: 9 },
       { href: "/dependencies", label: "Dependencies", icon: Network, phase: 9 },
+      { href: "/wiki", label: "Wiki", icon: BookText },
     ],
   },
   {

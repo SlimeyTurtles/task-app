@@ -5,6 +5,8 @@ import { z } from "zod";
 import { protectedProcedure, router } from "../init";
 import { addDays, startOfLocalDay } from "@/lib/scheduling";
 import { inferTaskMetadata } from "@/server/lib/ai-infer-task";
+import { applyFactDeltas } from "@/server/lib/apply-fact-deltas";
+import { gatherUserContext } from "@/server/lib/context";
 
 const AttributionInput = z.object({
   taskId: z.string(),
@@ -320,10 +322,18 @@ export const eventsRouter = router({
             select: { id: true, name: true, description: true },
           });
 
+      // Pull the user's second-brain context relevant to this title/desc so
+      // the AI has people/projects/preferences to lean on.
+      const context = await gatherUserContext(
+        ctx.db,
+        userId,
+        `${input.title}\n${input.description ?? ""}`,
+      );
+
       // Let Claude fill in any of {estimatedMinutes, stress, exhaustion,
       // importance, urgency, tagIds} the user left blank — using the title +
-      // description + tag catalog. Skips fields the user explicitly set;
-      // no-ops if no CLAUDE_API_KEY is configured.
+      // description + tag catalog + second-brain context. Skips fields the
+      // user explicitly set; no-ops if no CLAUDE_API_KEY is configured.
       const inferred = await inferTaskMetadata({
         title: input.title,
         description: input.description ?? null,
@@ -336,6 +346,12 @@ export const eventsRouter = router({
           tagIds: input.tagIds,
         },
         availableTags,
+        userContext: context.promptText,
+        contextMemories: context.memories.map((m) => ({
+          id: m.id,
+          content: m.content,
+          status: m.status,
+        })),
       });
 
       const estimatedMinutes = input.estimatedMinutes ?? inferred.estimatedMinutes ?? null;
@@ -419,6 +435,15 @@ export const eventsRouter = router({
             : {}),
         },
       });
+
+      // Best-effort: write any second-brain updates the AI proposed.
+      if (inferred.factDeltas?.length) {
+        try {
+          await applyFactDeltas(ctx.db, userId, inferred.factDeltas, "ai-quickAdd");
+        } catch (err) {
+          console.error("[quickAdd] applyFactDeltas failed:", err);
+        }
+      }
 
       return { event, inferred, taskId };
     }),

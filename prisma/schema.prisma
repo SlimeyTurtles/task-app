@@ -54,6 +54,81 @@ model User {
 
   invitesCreated   Invite[] @relation("InvitesCreated")
   inviteRedeemed   Invite[] @relation("InviteUsed")
+
+  // Second brain — the LLM's working knowledge of the user.
+  profile     UserProfile?
+  wikiPages   WikiPage[]
+  memories    Memory[]
+}
+
+// ----------------------------------------------------------------------------
+// Second brain: Profile (always-on context), WikiPage (curated entities with
+// [[wikilinks]]), Memory (atomic facts, AI-extractable, append-only with
+// supersede chains for AI-driven updates).
+// ----------------------------------------------------------------------------
+
+model UserProfile {
+  id        String   @id @default(cuid())
+  userId    String   @unique
+  // Markdown. Always loaded into the AI system prompt. The "who am I, what
+  // do I work on, how do I work" doc.
+  content   String   @default("")
+  updatedAt DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model WikiPage {
+  id      String   @id @default(cuid())
+  userId  String
+  slug    String   // url-safe, unique per user
+  title   String
+  // Markdown with [[Other Page]] wikilinks. Auto-created targets are fine.
+  content String   @default("")
+  // Names this page can also be referenced by ("PI", "advisor", "mom").
+  // Used to resolve user input against pages without forcing exact title match.
+  aliases String[] @default([])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, slug])
+  @@index([userId])
+}
+
+enum MemoryStatus {
+  PENDING    // newly added, awaiting user review
+  CONFIRMED  // user (or system) said yes — eligible for retrieval
+  REJECTED   // user said no — hidden from retrieval
+  STALE      // ai-flagged as possibly outdated; still retrievable but de-prioritised
+  SUPERSEDED // replaced by a newer memory (chain via supersedesId)
+}
+
+model Memory {
+  id      String @id @default(cuid())
+  userId  String
+  // The fact itself, as a sentence. May contain [[Wikilinks]].
+  content String
+
+  status MemoryStatus @default(PENDING)
+  // How did this memory get here? "ai-extracted" | "ai-update" | "manual" | etc.
+  source String?
+
+  // Supersede chain — when AI replaces an old fact, we keep both and link
+  // them so we don't lose the history. Old one becomes SUPERSEDED.
+  supersedesId  String?  @unique
+  supersedes    Memory?  @relation("MemorySupersede", fields: [supersedesId], references: [id], onDelete: SetNull)
+  supersededBy  Memory?  @relation("MemorySupersede")
+
+  createdAt   DateTime  @default(now())
+  confirmedAt DateTime?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, status])
+  @@index([userId, createdAt])
 }
 
 // Signup is gated: an unused, unexpired Invite token is required to create

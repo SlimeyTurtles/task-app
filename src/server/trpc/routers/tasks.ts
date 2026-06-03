@@ -5,6 +5,8 @@ import { z } from "zod";
 import { protectedProcedure, router } from "../init";
 import { getTaskAccess, canRead, canWrite } from "@/server/lib/access";
 import { inferTaskMetadata } from "@/server/lib/ai-infer-task";
+import { applyFactDeltas } from "@/server/lib/apply-fact-deltas";
+import { gatherUserContext } from "@/server/lib/context";
 import { findFreeSlot } from "./events";
 
 const StressInt = z.number().int().min(0).max(10);
@@ -311,6 +313,15 @@ export const tasksRouter = router({
             select: { id: true, name: true, description: true },
           });
 
+      // Second-brain context: profile + relevant wiki pages + recent
+      // memories that overlap with the input. The AI is allowed to
+      // propose factDeltas against the memories we hand it.
+      const context = await gatherUserContext(
+        ctx.db,
+        userId,
+        `${task.name}\n${task.description ?? ""}`,
+      );
+
       const inferred = await inferTaskMetadata({
         title: task.name,
         description: task.description,
@@ -324,6 +335,12 @@ export const tasksRouter = router({
         },
         availableTags,
         enhanceText: true,
+        userContext: context.promptText,
+        contextMemories: context.memories.map((m) => ({
+          id: m.id,
+          content: m.content,
+          status: m.status,
+        })),
       });
 
       // Apply only what came back — leave user-set values alone.
@@ -390,6 +407,16 @@ export const tasksRouter = router({
 
         return { task: updatedTask, event };
       });
+
+      // Apply any second-brain updates the AI proposed. Best-effort: if
+      // this throws, we still want the task scheduled.
+      if (inferred.factDeltas?.length) {
+        try {
+          await applyFactDeltas(ctx.db, userId, inferred.factDeltas, "ai-aiSchedule");
+        } catch (err) {
+          console.error("[aiSchedule] applyFactDeltas failed:", err);
+        }
+      }
 
       return { ...result, inferred };
     }),

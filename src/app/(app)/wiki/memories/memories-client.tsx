@@ -10,6 +10,16 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 import { trpc } from "@/lib/trpc/client";
+import { RotatingTagline } from "@/components/app/rotating-tagline";
+
+const MEMORIES_EMPTY = [
+  "Nothing yet. Margaret hasn't recited the family tree at you.",
+  "Empty. Even Linda's alphabetical Rolodex is just letters.",
+  "Quiet. The AI is taking notes like Mike with his 'system.'",
+  "Nothing. Patricia hasn't called to confirm the family reunion.",
+  "Empty. Tony's 412 unread emails wish they were this tidy.",
+  "Blank. Bertha hasn't dropped a bombshell about Aunt Carol yet.",
+];
 
 type Status = "PENDING" | "CONFIRMED" | "REJECTED" | "STALE" | "SUPERSEDED";
 
@@ -118,7 +128,7 @@ export function MemoriesClient() {
                             autoFocus
                             value={editText}
                             onChange={(e) => setEditText(e.target.value)}
-                            className="min-h-[3rem] text-sm"
+                            className="min-h-12 text-sm"
                           />
                         ) : (
                           <p className="text-sm leading-relaxed">{m.content}</p>
@@ -228,9 +238,14 @@ export function MemoriesClient() {
         {isLoading ? (
           <p className="text-sm text-muted-foreground">Loading…</p>
         ) : memories && memories.length === 0 ? (
-          <p className="text-sm text-muted-foreground italic">
-            No memories yet. AI will add suggestions here as it learns.
-          </p>
+          <div className="py-6 text-center grid gap-1.5">
+            <p className="font-heading text-lg tracking-tight">
+              <RotatingTagline taglines={MEMORIES_EMPTY} />
+            </p>
+            <p className="text-xs text-muted-foreground">
+              AI will drop suggestions here as it learns. You can also add facts manually above.
+            </p>
+          </div>
         ) : null}
       </div>
     </div>

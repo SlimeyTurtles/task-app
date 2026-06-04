@@ -12,6 +12,16 @@ import { Label } from "@/components/ui/label";
 import { trpc } from "@/lib/trpc/client";
 import { ProjectFormDialog } from "@/components/projects/project-form-dialog";
 import { formatDate } from "@/lib/format";
+import { RotatingTagline } from "@/components/app/rotating-tagline";
+
+const PROJECTS_EMPTY = [
+  "No projects yet. Bertha's been planning Thanksgiving since June.",
+  "Empty. Even Dave from HR has a 'side project.' It's a podcast.",
+  "No projects. Carlos has 12. Three are journals about journaling.",
+  "Empty. Greg's Excel sheet would call this a 'pipeline gap.'",
+  "Nothing. Frank's garage rewire is somehow still in scope.",
+  "No projects. Your friend's screenplay is on draft seventeen.",
+];
 
 const STATUS_LABEL: Record<ProjectStatus, string> = {
   ACTIVE: "active",
@@ -82,7 +92,14 @@ export function ProjectsClient() {
             </Card>
           ))
         ) : (
-          <p className="text-sm text-muted-foreground">No projects yet.</p>
+          <div className="py-6 text-center grid gap-1.5">
+            <p className="font-heading text-lg tracking-tight">
+              <RotatingTagline taglines={PROJECTS_EMPTY} />
+            </p>
+            <p className="text-xs text-muted-foreground">
+              Create a project to track something with a beginning, middle, and end.
+            </p>
+          </div>
         )}
       </div>
 

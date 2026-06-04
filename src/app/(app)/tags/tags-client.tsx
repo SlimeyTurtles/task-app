@@ -17,6 +17,16 @@ import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 import { trpc } from "@/lib/trpc/client";
 import { ShareDialog, type ShareTarget } from "@/components/sharing/share-dialog";
+import { RotatingTagline } from "@/components/app/rotating-tagline";
+
+const TAGS_EMPTY = [
+  "No tags. Linda would alphabetize empty space if you asked.",
+  "Empty. Carol files her emails by sender, sub-sender, and mood.",
+  "No tags yet. Margaret organized everything by colour. It worked.",
+  "Empty. Tony's email is a tag wasteland. Don't be Tony.",
+  "No tags. Greg's spreadsheet has six tag systems for a list of two.",
+  "Empty. Mike's color-coding scheme requires a key. Mike lost the key.",
+];
 
 type TagRow = {
   id: string;
@@ -83,10 +93,15 @@ export function TagsClient() {
         {isLoading ? (
           <p className="text-sm text-muted-foreground">Loading tags…</p>
         ) : tree.length === 0 ? (
-          <p className="text-sm text-muted-foreground">
-            No tags yet. Tags are orthogonal to areas/projects — use them for context labels like
-            &quot;morning,&quot; &quot;low-energy,&quot; &quot;errand,&quot; or for groupings like Seymour → Cats → Pets.
-          </p>
+          <div className="py-6 text-center grid gap-1.5">
+            <p className="font-heading text-lg tracking-tight">
+              <RotatingTagline taglines={TAGS_EMPTY} />
+            </p>
+            <p className="text-xs text-muted-foreground max-w-md mx-auto">
+              Tags are orthogonal to areas/projects — use them for context labels like
+              &quot;morning,&quot; &quot;low-energy,&quot; &quot;errand,&quot; or for groupings like Seymour → Cats → Pets.
+            </p>
+          </div>
         ) : (
           <Card className="p-2">
             <ul className="space-y-0.5">

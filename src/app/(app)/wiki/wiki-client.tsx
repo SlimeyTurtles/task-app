@@ -13,6 +13,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 import { trpc } from "@/lib/trpc/client";
 import { WikiText } from "@/components/wiki/wikilink";
+import { RotatingTagline } from "@/components/app/rotating-tagline";
 
 /**
  * Two-pane wiki: left sidebar lists Profile + Pages + a link to /wiki/memories;
@@ -116,43 +117,25 @@ export function WikiClient({ slug }: { slug?: string }) {
   );
 }
 
-// Playful landing copy that swaps every ~9 seconds. Initial render uses
-// index 0 (deterministic for SSR), then on mount we jump to a random
-// one and start the interval — that way every visit feels fresh without
-// causing a hydration mismatch.
+// Recurring cast of wacky characters across the empty-state taglines —
+// Bertha, Greg, Carol, Linda, Margaret, etc. They show up everywhere.
 const LANDING_TAGLINES = [
-  "Your brain, but with a search box.",
-  "A diary that pulls its weight.",
-  "The part of your memory that doesn't get drunk.",
-  "Like writing things on your hand, but more dignified.",
-  "External RAM for the squishy biological machine.",
-  "For all the stuff you say “hold on, I know this” about.",
-  "It's a wiki. About you. Mostly written by a robot.",
-  "Where “I told you this last Tuesday” becomes provable.",
-  "An external hard drive for your gut feelings.",
-  "The thing you wish you had during your last 1-on-1.",
-  "It's a journal, except other people might read it. (Just kidding. Just the AI.)",
+  "Like Margaret's index-card system, but it doesn't catch fire.",
+  "It's that drawer at Grandma's house, except indexed.",
+  "The Moleskine Carlos won't shut up about. But searchable.",
+  "What Bertha keeps in her head, but typed.",
+  "Linda's Rolodex, after a software degree.",
+  "Like Greg's Excel sheets, but useful.",
+  "It's a journal. Other people might read it. (Kidding. Just the AI.)",
+  "The thing Dave from HR thinks he has but doesn't.",
+  "Your mom's address book, plus opinions.",
 ];
 
 function Landing() {
-  const [i, setI] = useState(0);
-  useEffect(() => {
-    setI(Math.floor(Math.random() * LANDING_TAGLINES.length));
-    const id = setInterval(
-      () => setI((x) => (x + 1 + Math.floor(Math.random() * (LANDING_TAGLINES.length - 1))) % LANDING_TAGLINES.length),
-      9_000,
-    );
-    return () => clearInterval(id);
-  }, []);
-
   return (
     <div className="p-10 max-w-2xl">
-      {/* Key on the heading triggers a re-mount + fade-in on each swap. */}
-      <h1
-        key={i}
-        className="font-heading text-3xl tracking-tight animate-in fade-in-0 duration-700"
-      >
-        {LANDING_TAGLINES[i]}
+      <h1 className="font-heading text-3xl tracking-tight">
+        <RotatingTagline taglines={LANDING_TAGLINES} />
       </h1>
       <p className="text-sm text-muted-foreground mt-2 max-w-md">
         Profile is the always-on doc. Pages can be anything — people, projects,

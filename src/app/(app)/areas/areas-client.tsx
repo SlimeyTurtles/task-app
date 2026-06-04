@@ -10,6 +10,15 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
 import { trpc } from "@/lib/trpc/client";
 import { AreaFormDialog } from "@/components/areas/area-form-dialog";
+import { RotatingTagline } from "@/components/app/rotating-tagline";
+
+const AREAS_EMPTY = [
+  "No areas yet. Greg has 47. Don't be Greg. Maybe four Gregs.",
+  "Empty. Even Frank's garage shelves are labeled.",
+  "No areas. Patricia would say 'we should organize the photos.' She's right.",
+  "Empty. Mike's 'system' would be six areas. Mike doesn't have a system.",
+  "No areas. Bertha would just say 'the everything drawer.' It's a vibe.",
+];
 
 type Area = {
   id: string;
@@ -116,9 +125,14 @@ export function AreasClient() {
           ))}
         </div>
       ) : (
-        <p className="text-sm text-muted-foreground mt-6">
-          No areas yet. Create one to organize your ongoing responsibilities.
-        </p>
+        <div className="py-6 text-center grid gap-1.5 mt-2">
+          <p className="font-heading text-lg tracking-tight">
+            <RotatingTagline taglines={AREAS_EMPTY} />
+          </p>
+          <p className="text-xs text-muted-foreground">
+            Create one to organize your ongoing responsibilities.
+          </p>
+        </div>
       )}
 
       <AreaFormDialog

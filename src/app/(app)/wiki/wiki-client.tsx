@@ -117,18 +117,16 @@ export function WikiClient({ slug }: { slug?: string }) {
   );
 }
 
-// Recurring cast of wacky characters across the empty-state taglines —
-// Bertha, Greg, Carol, Linda, Margaret, etc. They show up everywhere.
+// Cast canon lives in `empty-state-cast.ts`. Voice: deadpan-affectionate.
 const LANDING_TAGLINES = [
-  "Like Margaret's index-card system, but it doesn't catch fire.",
-  "It's that drawer at Grandma's house, except indexed.",
-  "The Moleskine Carlos won't shut up about. But searchable.",
-  "What Bertha keeps in her head, but typed.",
-  "Linda's Rolodex, after a software degree.",
-  "Like Greg's Excel sheets, but useful.",
-  "It's a journal. Other people might read it. (Kidding. Just the AI.)",
-  "The thing Dave from HR thinks he has but doesn't.",
-  "Your mom's address book, plus opinions.",
+  "What Esmeralda keeps in her crystal-ball maintenance binder.",
+  "Kazimir's nightmare atlas, but in markdown.",
+  "Like Gertrude's haunting log, but you can search it.",
+  "Petros's plant-therapy case files. Less mossy.",
+  "Wendell's fortune-cookie draft folder. The good ones.",
+  "Mireille's salt-vs-freshwater tax encyclopedia, dry version.",
+  "Bartholomew's time-loop notebook. He's read this entry already.",
+  "Lucinda's Bigfoot etiquette workbook, professionalised.",
 ];
 
 function Landing() {

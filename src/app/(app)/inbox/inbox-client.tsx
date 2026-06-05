@@ -9,14 +9,14 @@ import { trpc } from "@/lib/trpc/client";
 import { RotatingTagline } from "@/components/app/rotating-tagline";
 
 const INBOX_EMPTY = [
-  "Empty. Bertha hasn't called to dictate her grocery list yet.",
-  "Quiet in here. Carol from accounting still owes you a follow-up.",
-  "Nothing yet. Even Greg's Excel sheets are at zero today.",
-  "Empty. Your aunt's brain hasn't kicked in yet — give it coffee.",
-  "No notes. Carlos won't shut up about his Moleskine but he hasn't sent any.",
-  "Empty. Dave from HR thinks this is alarming. He's wrong about most things.",
-  "Nothing. Even Karen hasn't texted you at 11 PM yet.",
-  "Quiet. The mental tab where you keep your to-dos finally closed.",
+  "Empty. Esmeralda's crystal ball is just showing static.",
+  "Quiet. Kazimir hasn't logged a single nightmare today.",
+  "Nothing yet. Gertrude says even the ghosts have nothing to report.",
+  "Empty. Petros's plants are sleeping through their sessions.",
+  "No notes. Wendell hasn't cracked a single cookie this morning.",
+  "Quiet. Mireille's mer-tax season hasn't opened yet.",
+  "Empty. Bartholomew swears today only happens once. He's wrong.",
+  "Nothing. Lucinda's Sasquatches cancelled brunch again.",
 ];
 
 export function InboxClient() {

@@ -53,6 +53,10 @@ services:
       RESEND_API_KEY: ${RESEND_API_KEY:-}
       EMAIL_FROM: ${EMAIL_FROM:-Almanac <almanac@avinh.net>}
       EMAIL_REPLY_TO: ${EMAIL_REPLY_TO:-avinhahuynh@gmail.com}
+      # Used by Date#setHours / startOfLocalDay in findFreeSlot — without
+      # this, "work starts at 8 AM" gets interpreted as 8 AM UTC, which is
+      # 1 AM Pacific. Per-user TZ is a follow-up.
+      TZ: ${TZ:-America/Los_Angeles}
     ports:
       - "${WEB_PORT:-3002}:3000"
     # First boot: bring an empty volume up to schema, then start the

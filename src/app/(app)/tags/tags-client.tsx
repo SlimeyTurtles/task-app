@@ -20,12 +20,14 @@ import { ShareDialog, type ShareTarget } from "@/components/sharing/share-dialog
 import { RotatingTagline } from "@/components/app/rotating-tagline";
 
 const TAGS_EMPTY = [
-  "No tags. Linda would alphabetize empty space if you asked.",
-  "Empty. Carol files her emails by sender, sub-sender, and mood.",
-  "No tags yet. Margaret organized everything by colour. It worked.",
-  "Empty. Tony's email is a tag wasteland. Don't be Tony.",
-  "No tags. Greg's spreadsheet has six tag systems for a list of two.",
-  "Empty. Mike's color-coding scheme requires a key. Mike lost the key.",
+  "No tags. Esmeralda just colour-codes by ball-drip pattern.",
+  "Empty. Kazimir tags by dream genre. He's a hipster about it.",
+  "No tags. Gertrude files by haunting decibel level.",
+  "Empty. Petros tags 'moist' and 'cranky.' Two tags, infinite cases.",
+  "No tags. Wendell's cookies are categorised by pithiness.",
+  "Empty. Mireille tags by salinity. There are two.",
+  "No tags. Bartholomew's tags all read 'happened before.'",
+  "Empty. Lucinda's only tag is 'foliage-appropriate.'",
 ];
 
 type TagRow = {

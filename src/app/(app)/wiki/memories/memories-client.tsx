@@ -13,12 +13,14 @@ import { trpc } from "@/lib/trpc/client";
 import { RotatingTagline } from "@/components/app/rotating-tagline";
 
 const MEMORIES_EMPTY = [
-  "Nothing yet. Margaret hasn't recited the family tree at you.",
-  "Empty. Even Linda's alphabetical Rolodex is just letters.",
-  "Quiet. The AI is taking notes like Mike with his 'system.'",
-  "Nothing. Patricia hasn't called to confirm the family reunion.",
-  "Empty. Tony's 412 unread emails wish they were this tidy.",
-  "Blank. Bertha hasn't dropped a bombshell about Aunt Carol yet.",
+  "Empty. Esmeralda's crystal ball isn't showing anything yet.",
+  "Nothing. Kazimir's clients haven't dreamed yet tonight.",
+  "Quiet. Gertrude hasn't certified a single haunting.",
+  "Empty. Petros's plants are stoic this week.",
+  "Nothing. Wendell ran out of pithy aphorisms again.",
+  "Empty. Mireille's clients are all freshwater this season.",
+  "Quiet. Bartholomew is on his eighth loop, still no notes.",
+  "Empty. Lucinda's cryptid etiquette students are forest-bathing.",
 ];
 
 type Status = "PENDING" | "CONFIRMED" | "REJECTED" | "STALE" | "SUPERSEDED";

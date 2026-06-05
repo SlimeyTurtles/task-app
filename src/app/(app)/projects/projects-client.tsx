@@ -15,12 +15,14 @@ import { formatDate } from "@/lib/format";
 import { RotatingTagline } from "@/components/app/rotating-tagline";
 
 const PROJECTS_EMPTY = [
-  "No projects yet. Bertha's been planning Thanksgiving since June.",
-  "Empty. Even Dave from HR has a 'side project.' It's a podcast.",
-  "No projects. Carlos has 12. Three are journals about journaling.",
-  "Empty. Greg's Excel sheet would call this a 'pipeline gap.'",
-  "Nothing. Frank's garage rewire is somehow still in scope.",
-  "No projects. Your friend's screenplay is on draft seventeen.",
+  "Empty. Esmeralda's been polishing the same crystal ball since '04.",
+  "No projects. Kazimir is still on chapter one of the lucid-dream atlas.",
+  "Empty. Gertrude has one haunting cleared, four backlogged.",
+  "Nothing. Petros has been writing 'My Plant Cried' for two years.",
+  "Empty. Wendell's cookie-fortune collection vol. 2 is overdue.",
+  "No projects. Mireille's tax software for merfolk is in beta.",
+  "Empty. Bartholomew's case is unsolved. Always will be.",
+  "No projects. Lucinda's etiquette curriculum needs another draft. And another.",
 ];
 
 const STATUS_LABEL: Record<ProjectStatus, string> = {

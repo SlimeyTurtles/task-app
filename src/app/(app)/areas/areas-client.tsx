@@ -13,11 +13,14 @@ import { AreaFormDialog } from "@/components/areas/area-form-dialog";
 import { RotatingTagline } from "@/components/app/rotating-tagline";
 
 const AREAS_EMPTY = [
-  "No areas yet. Greg has 47. Don't be Greg. Maybe four Gregs.",
-  "Empty. Even Frank's garage shelves are labeled.",
-  "No areas. Patricia would say 'we should organize the photos.' She's right.",
-  "Empty. Mike's 'system' would be six areas. Mike doesn't have a system.",
-  "No areas. Bertha would just say 'the everything drawer.' It's a vibe.",
+  "Empty. Esmeralda runs everything out of a single dusty back room.",
+  "No areas. Kazimir charts dreams but never his own life.",
+  "Empty. Gertrude files everything by haunting county.",
+  "No areas. Petros has 'plants' and 'feelings.' That's it.",
+  "Empty. Wendell organises by which fortune got the best reviews.",
+  "No areas. Mireille has 'salt' and 'fresh.' Done.",
+  "Empty. Bartholomew lives in one area. Repeatedly.",
+  "No areas. Lucinda's only one is 'forest.'",
 ];
 
 type Area = {

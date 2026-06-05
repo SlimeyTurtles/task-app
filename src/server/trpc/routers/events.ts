@@ -7,6 +7,8 @@ import { addDays, startOfLocalDay } from "@/lib/scheduling";
 import { inferTaskMetadata } from "@/server/lib/ai-infer-task";
 import { applyFactDeltas } from "@/server/lib/apply-fact-deltas";
 import { gatherUserContext } from "@/server/lib/context";
+import { expandRecurring } from "./time-blocks";
+import { getSchedulingSettings } from "./settings";
 
 const AttributionInput = z.object({
   taskId: z.string(),
@@ -406,16 +408,20 @@ export const eventsRouter = router({
         source = EventSource.MANUAL;
       } else {
         const now = new Date();
-        const horizonEnd = new Date(now.getTime() + 21 * 86_400_000);
-        const busy = await ctx.db.event.findMany({
-          where: {
-            userId,
-            kind: EventKind.ACTIVE,
-            AND: [{ startsAt: { lt: horizonEnd } }, { endsAt: { gt: now } }],
-          },
-          select: { startsAt: true, endsAt: true },
+        const scheduling = await getSchedulingSettings(ctx.db, userId);
+        const busy = await gatherBusy(
+          ctx.db,
+          userId,
+          now,
+          scheduling.horizonDays,
+          scheduling.respectTimeBlocks,
+        );
+        const slot = findFreeSlot(now, durationMin, busy, {
+          workStartHour: scheduling.workStartHour,
+          workEndHour: scheduling.workEndHour,
+          slotStepMin: scheduling.slotStepMin,
+          horizonDays: scheduling.horizonDays,
         });
-        const slot = findFreeSlot(now, durationMin, busy);
         start = slot.start;
         end = slot.end;
         source = EventSource.SUGGESTED;
@@ -449,31 +455,45 @@ export const eventsRouter = router({
     }),
 });
 
-const WORK_START_HOUR = 8;
-const WORK_END_HOUR = 22;
-const SLOT_STEP_MIN = 15;
-
-/** First gap of `durationMin` in working hours (8 AM–10 PM) over the next 3 weeks that no ACTIVE event occupies. */
+/**
+ * First gap of `durationMin` inside the user's scheduling window that no
+ * busy interval occupies. `busy` should be the union of ACTIVE events and
+ * (when respectTimeBlocks is on) non-schedulableOnTop time blocks.
+ *
+ * Day boundaries + hours-of-day use the server's local time — set the
+ * container TZ to the user's zone (see docker-compose.yml).
+ */
 export function findFreeSlot(
   now: Date,
   durationMin: number,
   busy: { startsAt: Date; endsAt: Date }[],
+  opts?: {
+    workStartHour?: number;
+    workEndHour?: number;
+    slotStepMin?: number;
+    horizonDays?: number;
+  },
 ): { start: Date; end: Date } {
+  const workStart = opts?.workStartHour ?? 8;
+  const workEnd = opts?.workEndHour ?? 22;
+  const step = opts?.slotStepMin ?? 15;
+  const horizon = opts?.horizonDays ?? 21;
+
   const durMs = durationMin * 60_000;
-  const stepMs = SLOT_STEP_MIN * 60_000;
+  const stepMs = step * 60_000;
   const earliest = new Date(now);
   earliest.setSeconds(0, 0);
-  earliest.setMinutes(Math.ceil(earliest.getMinutes() / SLOT_STEP_MIN) * SLOT_STEP_MIN);
+  earliest.setMinutes(Math.ceil(earliest.getMinutes() / step) * step);
 
-  for (let day = 0; day < 21; day++) {
+  for (let day = 0; day < horizon; day++) {
     const base = startOfLocalDay(addDays(now, day));
     const winEnd = new Date(base);
-    winEnd.setHours(WORK_END_HOUR, 0, 0, 0);
+    winEnd.setHours(workEnd, 0, 0, 0);
     let t = new Date(base);
-    t.setHours(WORK_START_HOUR, 0, 0, 0);
+    t.setHours(workStart, 0, 0, 0);
     if (t < earliest) t = new Date(earliest);
     // align to step
-    t.setMinutes(Math.ceil(t.getMinutes() / SLOT_STEP_MIN) * SLOT_STEP_MIN, 0, 0);
+    t.setMinutes(Math.ceil(t.getMinutes() / step) * step, 0, 0);
 
     while (t.getTime() + durMs <= winEnd.getTime()) {
       const end = new Date(t.getTime() + durMs);
@@ -484,6 +504,45 @@ export function findFreeSlot(
   }
   // Fallback: the earliest aligned slot regardless of collisions.
   return { start: earliest, end: new Date(earliest.getTime() + durMs) };
+}
+
+/**
+ * Build the full "busy" list for the auto-scheduler: ACTIVE events plus
+ * (optionally) the user's time blocks expanded over the horizon. Blocks
+ * with schedulableOnTop=true (work-hours, focus, etc. the user marks as
+ * "the planner can still place tasks here") are skipped.
+ */
+export async function gatherBusy(
+  db: import("@prisma/client").PrismaClient,
+  userId: string,
+  now: Date,
+  horizonDays: number,
+  respectTimeBlocks: boolean,
+): Promise<{ startsAt: Date; endsAt: Date }[]> {
+  const horizonEnd = new Date(now.getTime() + horizonDays * 86_400_000);
+  const events = await db.event.findMany({
+    where: {
+      userId,
+      kind: EventKind.ACTIVE,
+      AND: [{ startsAt: { lt: horizonEnd } }, { endsAt: { gt: now } }],
+    },
+    select: { startsAt: true, endsAt: true },
+  });
+
+  if (!respectTimeBlocks) return events;
+
+  const blocks = await db.timeBlock.findMany({
+    where: {
+      userId,
+      schedulableOnTop: false,
+      OR: [
+        { rrule: null, startsAt: { lt: horizonEnd }, endsAt: { gt: now } },
+        { rrule: { not: null }, startsAt: { lte: horizonEnd } },
+      ],
+    },
+  });
+  const occurrences = blocks.flatMap((b) => expandRecurring(b, now, horizonEnd));
+  return [...events, ...occurrences];
 }
 
 function computeConfidence(lazy: boolean, startsAt: Date, endsAt: Date): number {

@@ -17,6 +17,7 @@ import {
   Bell,
   Users,
   KeyRound,
+  Wand,
   type LucideIcon,
 } from "lucide-react";
 
@@ -65,6 +66,7 @@ export const NAV: NavSection[] = [
     label: "Settings",
     items: [
       { href: "/settings/profile", label: "Profile", icon: User, phase: 1 },
+      { href: "/settings/scheduling", label: "Find a spot", icon: Wand },
       { href: "/settings/capacity", label: "Capacity", icon: Battery, phase: 4 },
       { href: "/settings/time-blocks", label: "Time blocks", icon: Clock, phase: 4 },
       { href: "/settings/notifications", label: "Notifications", icon: Bell, phase: 8 },

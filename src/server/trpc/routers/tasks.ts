@@ -7,7 +7,8 @@ import { getTaskAccess, canRead, canWrite } from "@/server/lib/access";
 import { inferTaskMetadata } from "@/server/lib/ai-infer-task";
 import { applyFactDeltas } from "@/server/lib/apply-fact-deltas";
 import { gatherUserContext } from "@/server/lib/context";
-import { findFreeSlot } from "./events";
+import { findFreeSlot, gatherBusy } from "./events";
+import { getSchedulingSettings } from "./settings";
 
 const StressInt = z.number().int().min(0).max(10);
 const ValenceInt = z.number().int().min(-5).max(5);
@@ -355,18 +356,24 @@ export const tasksRouter = router({
 
       const durationMin = Math.min(12 * 60, Math.max(15, estimatedMinutes ?? 60));
 
-      // Find a free slot now so we have a place to put it.
+      // Find a free slot, honoring the user's scheduling preferences and
+      // any time blocks (sleep, work hours, etc.) they've marked as not
+      // schedulable on top.
       const now = new Date();
-      const horizonEnd = new Date(now.getTime() + 21 * 86_400_000);
-      const busy = await ctx.db.event.findMany({
-        where: {
-          userId,
-          kind: EventKind.ACTIVE,
-          AND: [{ startsAt: { lt: horizonEnd } }, { endsAt: { gt: now } }],
-        },
-        select: { startsAt: true, endsAt: true },
+      const scheduling = await getSchedulingSettings(ctx.db, userId);
+      const busy = await gatherBusy(
+        ctx.db,
+        userId,
+        now,
+        scheduling.horizonDays,
+        scheduling.respectTimeBlocks,
+      );
+      const slot = findFreeSlot(now, durationMin, busy, {
+        workStartHour: scheduling.workStartHour,
+        workEndHour: scheduling.workEndHour,
+        slotStepMin: scheduling.slotStepMin,
+        horizonDays: scheduling.horizonDays,
       });
-      const slot = findFreeSlot(now, durationMin, busy);
 
       // One transaction: update the task, attach any new tags, mark it
       // SCHEDULED, and create the event linked to it.

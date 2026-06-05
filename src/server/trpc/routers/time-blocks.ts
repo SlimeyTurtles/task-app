@@ -30,7 +30,7 @@ function parseRule(rrule: string | null): { freq: "DAILY" | "WEEKLY"; byday?: nu
 
 type Occurrence = Omit<TimeBlock, "createdAt" | "updatedAt"> & { baseId: string };
 
-function expandRecurring(block: TimeBlock, rangeStart: Date, rangeEnd: Date): Occurrence[] {
+export function expandRecurring(block: TimeBlock, rangeStart: Date, rangeEnd: Date): Occurrence[] {
   const rule = parseRule(block.rrule);
   const durationMs = block.endsAt.getTime() - block.startsAt.getTime();
   const h = block.startsAt.getHours();

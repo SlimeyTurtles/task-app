@@ -89,6 +89,7 @@ export const eventsRouter = router({
               select: {
                 id: true,
                 name: true,
+                description: true,
                 status: true,
                 stress: true,
                 exhaustion: true,

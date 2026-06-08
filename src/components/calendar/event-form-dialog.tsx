@@ -64,6 +64,10 @@ export type EventDialogState = {
     kind?: EventKind;
     taskIds?: string[];
     lazy?: boolean;
+    /** True when the user picked this time deliberately (e.g. drag-to-create
+     * on the calendar grid). Without this, the dialog defaults to
+     * "Find a spot" — which silently throws their pick away. */
+    pickedTime?: boolean;
   };
 };
 
@@ -252,7 +256,9 @@ export function EventFormDialog({ state, onClose }: { state: EventDialogState; o
       setEndDate(dateToInputValue(existing.endsAt));
       setEndTime(toTimeInputValue(existing.endsAt));
       setLazy(existing.confidence < 1);
-      setNotes(existing.notes ?? "");
+      // Same trick as title: quickAdd stores description on the linked Task,
+      // not on the Event. Fall back so editing shows what was originally typed.
+      setNotes(existing.notes ?? existing.attributions[0]?.task?.description ?? "");
       setTaskIds(existing.attributions.map((a) => a.taskId));
       setTaskFilter("");
       setCreateTask(false);
@@ -268,8 +274,10 @@ export function EventFormDialog({ state, onClose }: { state: EventDialogState; o
       setTagIds((titleTask?.tags ?? []).map((t) => t.tagId));
     } else if (state.init) {
       setMode(state.init.kind === EventKind.BACKGROUND ? "block" : "event");
-      // New events default to "Find a spot" + auto-create a linked task.
-      setWhenMode("auto");
+      // If the user picked the time deliberately (drag-to-create on the
+      // calendar), start in "Pick a time" mode so their pick survives.
+      // For generic "New event" button clicks, default to "Find a spot".
+      setWhenMode(state.init.pickedTime ? "manual" : "auto");
       setEventTitle("");
       setStartDate(dateToInputValue(state.init.startsAt));
       setStartTime(toTimeInputValue(state.init.startsAt));

@@ -172,7 +172,9 @@ export function CalendarClient() {
             events={gridEvents}
             timeBlocks={(blocks ?? []) as never}
             hourHeight={hourHeight}
-            onCreateRange={(start, end) => setDialog({ open: true, init: { startsAt: start, endsAt: end } })}
+            onCreateRange={(start, end) =>
+              setDialog({ open: true, init: { startsAt: start, endsAt: end, pickedTime: true } })
+            }
             onEditEvent={(eventId) => setDialog({ open: true, eventId })}
             onMoveEvent={(eventId, start, end) => update.mutate({ id: eventId, startsAt: start, endsAt: end })}
             onResizeEvent={(eventId, start, end) => update.mutate({ id: eventId, startsAt: start, endsAt: end })}

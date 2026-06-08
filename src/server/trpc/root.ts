@@ -13,6 +13,8 @@ import { tagsRouter } from "./routers/tags";
 import { tasksRouter } from "./routers/tasks";
 import { timeBlocksRouter } from "./routers/time-blocks";
 import { wikiRouter } from "./routers/wiki";
+import { chatRouter } from "./routers/chat";
+import { apiKeysRouter } from "./routers/api-keys";
 
 export const appRouter = router({
   health: publicProcedure.query(() => ({ status: "ok" as const, time: new Date().toISOString() })),
@@ -30,6 +32,8 @@ export const appRouter = router({
   settings: settingsRouter,
   invites: invitesRouter,
   wiki: wikiRouter,
+  chat: chatRouter,
+  apiKeys: apiKeysRouter,
 });
 
 export type AppRouter = typeof appRouter;

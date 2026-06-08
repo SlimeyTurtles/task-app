@@ -1,9 +1,5 @@
-import { PageShell, PhaseStub } from "@/components/app/page-shell";
+import { ApiKeysClient } from "./api-keys-client";
 
-export default function ApiSettingsPage() {
-  return (
-    <PageShell title="API & Webhooks" description="API keys, webhook subscriptions, OpenAPI spec.">
-      <PhaseStub phase={7} />
-    </PageShell>
-  );
+export default function ApiKeysPage() {
+  return <ApiKeysClient />;
 }

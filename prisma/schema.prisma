@@ -59,6 +59,9 @@ model User {
   profile     UserProfile?
   wikiPages   WikiPage[]
   memories    Memory[]
+
+  chatFolders  ChatFolder[]
+  chatSessions ChatSession[]
 }
 
 // ----------------------------------------------------------------------------
@@ -104,6 +107,64 @@ enum MemoryStatus {
   REJECTED   // user said no — hidden from retrieval
   STALE      // ai-flagged as possibly outdated; still retrievable but de-prioritised
   SUPERSEDED // replaced by a newer memory (chain via supersedesId)
+}
+
+// ----------------------------------------------------------------------------
+// Journal — chat sessions logged from outside (e.g. via the MCP server,
+// when the user is talking to Claude CLI). Almanac is the store; the LLM
+// driving the chat lives elsewhere.
+// ----------------------------------------------------------------------------
+
+model ChatFolder {
+  id        String        @id @default(cuid())
+  userId    String
+  name      String
+  createdAt DateTime      @default(now())
+
+  user     User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  sessions ChatSession[]
+
+  @@unique([userId, name])
+  @@index([userId])
+}
+
+model ChatSession {
+  id           String      @id @default(cuid())
+  userId       String
+  folderId     String?
+  title        String      @default("Untitled")
+  // Free-form model identifier the caller used (e.g. "claude-opus-4-7",
+  // "cli-local"). Not validated — different surfaces have different ids.
+  model        String?
+  // When the AI last extracted durable facts from this session. Used so a
+  // future extractor only processes messages newer than this.
+  factsExtractedAt DateTime?
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+
+  user     User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  folder   ChatFolder?   @relation(fields: [folderId], references: [id], onDelete: SetNull)
+  messages ChatMessage[]
+
+  @@index([userId, updatedAt])
+}
+
+enum ChatRole {
+  USER
+  ASSISTANT
+  SYSTEM
+}
+
+model ChatMessage {
+  id        String   @id @default(cuid())
+  sessionId String
+  role      ChatRole
+  content   String
+  createdAt DateTime @default(now())
+
+  session ChatSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@index([sessionId, createdAt])
 }
 
 model Memory {
@@ -570,6 +631,9 @@ model ApiKey {
   id         String    @id @default(cuid())
   userId     String
   name       String
+  // First 8 chars of the secret part — shown in the UI ("alm_a1b2c3d4…")
+  // so the user can tell their keys apart without exposing the full key.
+  keyPrefix  String    @default("")
   hashedKey  String    @unique
   scopes     Json      @default("[]") // e.g. ["schedule:read", "tasks:write"]
   expiresAt  DateTime?

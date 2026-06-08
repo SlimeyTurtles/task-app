@@ -5,6 +5,7 @@ import {
   Folders,
   KanbanSquare,
   ListChecks,
+  MessageSquareText,
   Tag,
   Repeat,
   Sparkles,
@@ -41,6 +42,7 @@ export const NAV: NavSection[] = [
       { href: "/calendar", label: "Calendar", icon: CalendarDays, phase: 3 },
       { href: "/inbox", label: "Inbox", icon: Inbox, phase: 2 },
       { href: "/tasks", label: "All Tasks", icon: ListChecks, phase: 2 },
+      { href: "/journal", label: "Journal", icon: MessageSquareText },
     ],
   },
   {

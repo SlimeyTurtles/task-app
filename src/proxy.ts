@@ -6,9 +6,11 @@ const PUBLIC_PATHS = ["/login", "/register"];
 export async function proxy(req: NextRequest) {
   const { pathname } = req.nextUrl;
 
-  // Allow NextAuth, static assets, and public marketing pages to pass through.
+  // Allow NextAuth, static assets, the MCP endpoint (handles its own bearer
+  // auth), and public marketing pages to pass through.
   if (
     pathname.startsWith("/api/auth") ||
+    pathname.startsWith("/api/mcp") ||
     pathname.startsWith("/_next") ||
     pathname === "/favicon.ico" ||
     PUBLIC_PATHS.includes(pathname)

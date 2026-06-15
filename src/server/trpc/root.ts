@@ -15,6 +15,8 @@ import { timeBlocksRouter } from "./routers/time-blocks";
 import { wikiRouter } from "./routers/wiki";
 import { chatRouter } from "./routers/chat";
 import { apiKeysRouter } from "./routers/api-keys";
+import { recurrenceRouter } from "./routers/recurrence";
+import { notificationsRouter } from "./routers/notifications";
 
 export const appRouter = router({
   health: publicProcedure.query(() => ({ status: "ok" as const, time: new Date().toISOString() })),
@@ -34,6 +36,8 @@ export const appRouter = router({
   wiki: wikiRouter,
   chat: chatRouter,
   apiKeys: apiKeysRouter,
+  recurrence: recurrenceRouter,
+  notifications: notificationsRouter,
 });
 
 export type AppRouter = typeof appRouter;

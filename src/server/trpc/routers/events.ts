@@ -9,6 +9,7 @@ import { applyFactDeltas } from "@/server/lib/apply-fact-deltas";
 import { gatherUserContext } from "@/server/lib/context";
 import { expandRecurring } from "./time-blocks";
 import { getSchedulingSettings } from "./settings";
+import { repeatToRrule, type Repeat } from "@/lib/recurrence";
 
 const AttributionInput = z.object({
   taskId: z.string(),
@@ -301,6 +302,7 @@ export const eventsRouter = router({
         startsAt: z.date().nullish(),
         endsAt: z.date().nullish(),
         lazy: z.boolean().default(false),
+        repeat: z.enum(["none", "daily", "weekdays", "weekly"]).default("none"),
       }),
     )
     .mutation(async ({ ctx, input }) => {
@@ -442,6 +444,36 @@ export const eventsRouter = router({
             : {}),
         },
       });
+
+      // Persist a RecurrenceRule on the task when the user picked a Repeats
+      // option. The first occurrence is the event we just created; the
+      // materializer will fill in future ones on its next tick.
+      if (taskId && input.repeat !== "none") {
+        const rrule = repeatToRrule(input.repeat as Repeat);
+        if (rrule) {
+          await ctx.db.recurrenceRule.upsert({
+            where: { taskId },
+            create: {
+              taskId,
+              rrule,
+              timezone: "UTC",
+              exdates: [],
+              nextMaterializeAt: new Date(),
+            },
+            update: {
+              rrule,
+              timezone: "UTC",
+              nextMaterializeAt: new Date(),
+            },
+          });
+          // Also push the template task's dueDate up to the event's start so
+          // the materializer's RRULE expansion uses the right anchor.
+          await ctx.db.task.update({
+            where: { id: taskId },
+            data: { dueDate: start },
+          });
+        }
+      }
 
       // Best-effort: write any second-brain updates the AI proposed.
       if (inferred.factDeltas?.length) {

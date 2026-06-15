@@ -233,8 +233,12 @@ export function EventFormDialog({ state, onClose }: { state: EventDialogState; o
   // block-only
   const [blockKind, setBlockKind] = useState<TimeBlockKind>(TimeBlockKind.SLEEP);
   const [blockLabel, setBlockLabel] = useState("");
-  const [repeat, setRepeat] = useState<Repeat>("none");
   const [schedulable, setSchedulable] = useState(false);
+
+  // shared by both branches — "Repeats" applies to events (writes a
+  // RecurrenceRule on the linked task) and to background blocks (rrule on
+  // the block itself).
+  const [repeat, setRepeat] = useState<Repeat>("none");
 
   // AI overlay states.
   type AiState =
@@ -459,6 +463,7 @@ export function EventFormDialog({ state, onClose }: { state: EventDialogState; o
         startsAt: whenMode === "manual" ? (startAt ?? null) : null,
         endsAt: whenMode === "manual" ? (endAt ?? null) : null,
         lazy,
+        repeat,
       });
 
       await Promise.all([utils.events.list.invalidate(), utils.tasks.list.invalidate()]);
@@ -611,6 +616,22 @@ export function EventFormDialog({ state, onClose }: { state: EventDialogState; o
                     Drops into the next free slot in your working hours — drag to adjust after.
                   </p>
                 )}
+
+                {!editing ? (
+                  <div className="grid grid-cols-[1fr_auto] items-center gap-2 text-xs">
+                    <Label htmlFor="ev-repeat" className="text-[10px] text-muted-foreground uppercase tracking-wider font-medium">Repeats</Label>
+                    <select
+                      id="ev-repeat"
+                      value={repeat}
+                      onChange={(e) => setRepeat(e.target.value as Repeat)}
+                      className={cn(discreteInputClass, "w-32 bg-transparent")}
+                    >
+                      {REPEAT_OPTIONS.map((o) => (
+                        <option key={o.value} value={o.value}>{o.label}</option>
+                      ))}
+                    </select>
+                  </div>
+                ) : null}
 
                 {/* Jira-style metadata rows. Blank = AI infers. */}
                 <div className="grid gap-1 pt-2 border-t">

@@ -11,7 +11,12 @@ const DAY_MS = 24 * 60 * 60_000;
 const WINDOW_MINUTES = 24 * 60; // full day, fits viewport (no scroll)
 const SNAP = 15;
 const MIN_DURATION_MS = 15 * 60_000;
-const DRAG_THRESHOLD_MIN = 8;
+// Pixel-based so it doesn't get harder/easier at different zoom levels.
+// 4 px is roughly the smallest motion a user reliably makes deliberately.
+const DRAG_THRESHOLD_PX = 4;
+// Don't render the resize handle on events shorter than this many pixels —
+// the bottom-edge resize zone would eat most of the move area otherwise.
+const MIN_HEIGHT_FOR_RESIZE_PX = 28;
 
 type EventTag = { id: string; name: string; color: string | null };
 type EventTask = {
@@ -201,7 +206,8 @@ export function TimeGrid({
       const d = dragRef.current;
       if (!d) return;
       const { dayIndex, min } = readPointer(e.clientX, e.clientY);
-      const moved = d.moved || Math.abs(min - d.startMin) > DRAG_THRESHOLD_MIN || dayIndex !== d.startDayIndex;
+      const movedPx = Math.abs(min - d.startMin) * pxPerMin;
+      const moved = d.moved || movedPx > DRAG_THRESHOLD_PX || dayIndex !== d.startDayIndex;
       setDrag({ ...d, curDayIndex: dayIndex, curMin: min, moved });
     }
     function onUp() {

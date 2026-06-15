@@ -6,10 +6,11 @@ import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
 import { trpc } from "@/lib/trpc/client";
-import { addDays, endOfLocalDay, startOfLocalDay, startOfWeek } from "@/lib/scheduling";
+import { addDays, endOfLocalDay, startOfWeek } from "@/lib/scheduling";
 import { TimeGrid, type GridEvent } from "@/components/calendar/time-grid";
 import { MonthGrid } from "@/components/calendar/month-grid";
 import { EventFormDialog, type EventDialogState } from "@/components/calendar/event-form-dialog";
+import { EventCreateWizard, type WizardInit } from "@/components/calendar/event-create-wizard";
 import { PlanAheadDialog } from "@/components/calendar/plan-ahead-dialog";
 import { ViewControl, windowFor, type CalendarView } from "@/components/calendar/view-control";
 
@@ -24,6 +25,7 @@ export function CalendarClient() {
   const [navOffset, setNavOffset] = useState(0);
   const [hourHeight, setHourHeight] = useState(48);
   const [dialog, setDialog] = useState<EventDialogState>({ open: false });
+  const [wizard, setWizard] = useState<{ open: boolean; init: WizardInit | null }>({ open: false, init: null });
   const [planOpen, setPlanOpen] = useState(false);
 
   // Persist {view, hourHeight} to the user's DB-backed settings so the
@@ -158,7 +160,7 @@ export function CalendarClient() {
           <Button variant="outline" onClick={() => setPlanOpen(true)}>
             <Sparkles className="size-4" /> Plan ahead
           </Button>
-          <Button onClick={() => openCreate(setDialog, rangeStart)}>
+          <Button onClick={() => setWizard({ open: true, init: null })}>
             <Plus className="size-4" /> Event
           </Button>
         </div>
@@ -173,7 +175,7 @@ export function CalendarClient() {
             timeBlocks={(blocks ?? []) as never}
             hourHeight={hourHeight}
             onCreateRange={(start, end) =>
-              setDialog({ open: true, init: { startsAt: start, endsAt: end, pickedTime: true } })
+              setWizard({ open: true, init: { startsAt: start, endsAt: end, pickedTime: true } })
             }
             onEditEvent={(eventId) => setDialog({ open: true, eventId })}
             onMoveEvent={(eventId, start, end) => update.mutate({ id: eventId, startsAt: start, endsAt: end })}
@@ -188,7 +190,7 @@ export function CalendarClient() {
               const start = new Date(day);
               start.setHours(9, 0, 0, 0);
               const end = new Date(start.getTime() + 60 * 60_000);
-              setDialog({ open: true, init: { startsAt: start, endsAt: end } });
+              setWizard({ open: true, init: { startsAt: start, endsAt: end, pickedTime: true } });
             }}
             onEditEvent={(eventId) => setDialog({ open: true, eventId })}
           />
@@ -196,16 +198,14 @@ export function CalendarClient() {
       </div>
 
       <EventFormDialog state={dialog} onClose={() => setDialog({ open: false })} />
+      <EventCreateWizard
+        open={wizard.open}
+        init={wizard.init}
+        onClose={() => setWizard({ open: false, init: null })}
+      />
       <PlanAheadDialog open={planOpen} onOpenChange={setPlanOpen} />
     </div>
   );
-}
-
-function openCreate(setDialog: (s: EventDialogState) => void, anchor: Date) {
-  const start = startOfLocalDay(anchor);
-  start.setHours(9, 0, 0, 0);
-  const end = new Date(start.getTime() + 60 * 60_000);
-  setDialog({ open: true, init: { startsAt: start, endsAt: end } });
 }
 
 function rangeLabel(start: Date, end: Date): string {

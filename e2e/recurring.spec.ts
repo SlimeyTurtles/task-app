@@ -22,13 +22,22 @@ test("phase 8 — daily recurring event materializes future tasks", async ({ pag
   await page.waitForURL("**/calendar", { timeout: 30_000 });
   await page.waitForLoadState("networkidle");
 
-  // Create a daily-repeating event from the calendar.
+  // Create a daily-repeating event via the wizard.
   await page.getByRole("button", { name: "Event", exact: true }).click();
   const dialog = page.getByRole("dialog");
   await expect(dialog).toBeVisible();
-  await dialog.getByLabel("Name").fill("Stretching");
+  await dialog.getByLabel(/what's on your mind/i).fill("Stretching every morning");
+  // Wait for the confidence panel to populate so Continue is enabled.
+  await expect(dialog.locator(".bg-emerald-500, .bg-amber-500, .bg-rose-500").first()).toBeVisible({ timeout: 30_000 });
+  await dialog.getByRole("button", { name: /continue/i }).click();
+  // Skip Clarify if it shows.
+  if (await dialog.getByText(/I'm not sure about these/i).isVisible().catch(() => false)) {
+    await dialog.getByRole("button", { name: /continue/i }).click();
+  }
+  // On Confirm: rename to "Stretching" and force daily.
+  await dialog.getByLabel(/^Title$/i).fill("Stretching");
   await dialog.getByLabel(/^Repeats$/i).selectOption("daily");
-  await dialog.getByRole("button", { name: /find a spot & add|^log event$/i }).click();
+  await dialog.getByRole("button", { name: /^save$/i }).click();
   await expect(dialog).toBeHidden({ timeout: 30_000 });
 
   // Confirm a recurrence rule exists on /recurring + run materializer.

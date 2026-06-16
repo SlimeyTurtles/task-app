@@ -101,6 +101,7 @@ export const eventsRouter = router({
                 area: { select: { id: true, name: true, color: true } },
                 project: { select: { id: true, name: true } },
                 tags: { include: { tag: { select: { id: true, name: true, color: true } } } },
+                recurrenceRule: { select: { rrule: true, nextMaterializeAt: true } },
               },
             },
           },

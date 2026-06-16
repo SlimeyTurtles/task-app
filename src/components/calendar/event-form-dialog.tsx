@@ -22,7 +22,7 @@ import { TagPicker } from "@/components/tasks/tag-picker";
 import { cn } from "@/lib/utils";
 import { trpc } from "@/lib/trpc/client";
 import { dateToInputValue, inputValueToDate } from "@/lib/format";
-import { REPEAT_OPTIONS, repeatToRrule, type Repeat } from "@/lib/recurrence";
+import { REPEAT_OPTIONS, repeatToRrule, rruleToRepeat, type Repeat } from "@/lib/recurrence";
 
 type Mode = "event" | "block";
 type WhenMode = "manual" | "auto";
@@ -276,6 +276,10 @@ export function EventFormDialog({ state, onClose }: { state: EventDialogState; o
       setUrgVal(titleTask?.urgency != null ? String(titleTask.urgency) : "");
       setDueDate(titleTask?.dueDate ? dateToInputValue(titleTask.dueDate) : "");
       setTagIds((titleTask?.tags ?? []).map((t) => t.tagId));
+      // Seed Repeats from the linked task's recurrence rule. Paused rules
+      // (nextMaterializeAt = null) still surface their cadence so the user
+      // can see what's set; resume is a one-click change.
+      setRepeat(rruleToRepeat(titleTask?.recurrenceRule?.rrule ?? null));
     } else if (state.init) {
       setMode(state.init.kind === EventKind.BACKGROUND ? "block" : "event");
       // If the user picked the time deliberately (drag-to-create on the
@@ -314,12 +318,16 @@ export function EventFormDialog({ state, onClose }: { state: EventDialogState; o
   const quickCapture = trpc.tasks.quickCapture.useMutation();
   const quickAdd = trpc.events.quickAdd.useMutation();
   const updateTask = trpc.tasks.update.useMutation();
+  const upsertRecurrence = trpc.recurrence.upsert.useMutation();
+  const deleteRecurrence = trpc.recurrence.delete.useMutation();
   const pending =
     createEvent.isPending ||
     updateEvent.isPending ||
     createBlock.isPending ||
     quickCapture.isPending ||
-    quickAdd.isPending;
+    quickAdd.isPending ||
+    upsertRecurrence.isPending ||
+    deleteRecurrence.isPending;
 
   // When editing, wait for existing to load before allowing save (prevents the
   // race where empty taskIds would wipe the event's attributions).
@@ -414,6 +422,26 @@ export function EventFormDialog({ state, onClose }: { state: EventDialogState; o
         if (titleTaskId && changed) {
           await updateTask.mutateAsync({ id: titleTaskId, tagIds });
           await utils.tasks.list.invalidate();
+        }
+        // Sync recurrence on the linked task. Changing 'none' → cadence
+        // creates a rule; cadence → 'none' removes it (keeping already-
+        // materialized children intact via scope: 'rule_only').
+        if (titleTaskId) {
+          const prevRrule = existing?.attributions[0]?.task?.recurrenceRule?.rrule ?? null;
+          const prevRepeat = rruleToRepeat(prevRrule);
+          if (repeat !== prevRepeat) {
+            const nextRrule = repeatToRrule(repeat);
+            if (nextRrule) {
+              await upsertRecurrence.mutateAsync({
+                taskId: titleTaskId,
+                rrule: nextRrule,
+                timezone: "UTC",
+              });
+            } else {
+              await deleteRecurrence.mutateAsync({ taskId: titleTaskId, scope: "rule_only" });
+            }
+            await utils.recurrence.list.invalidate();
+          }
         }
         toast.success("Event updated.");
         await utils.events.list.invalidate();
@@ -617,21 +645,19 @@ export function EventFormDialog({ state, onClose }: { state: EventDialogState; o
                   </p>
                 )}
 
-                {!editing ? (
-                  <div className="grid grid-cols-[1fr_auto] items-center gap-2 text-xs">
-                    <Label htmlFor="ev-repeat" className="text-[10px] text-muted-foreground uppercase tracking-wider font-medium">Repeats</Label>
-                    <select
-                      id="ev-repeat"
-                      value={repeat}
-                      onChange={(e) => setRepeat(e.target.value as Repeat)}
-                      className={cn(discreteInputClass, "w-32 bg-transparent")}
-                    >
-                      {REPEAT_OPTIONS.map((o) => (
-                        <option key={o.value} value={o.value}>{o.label}</option>
-                      ))}
-                    </select>
-                  </div>
-                ) : null}
+                <div className="grid grid-cols-[1fr_auto] items-center gap-2 text-xs">
+                  <Label htmlFor="ev-repeat" className="text-[10px] text-muted-foreground uppercase tracking-wider font-medium">Repeats</Label>
+                  <select
+                    id="ev-repeat"
+                    value={repeat}
+                    onChange={(e) => setRepeat(e.target.value as Repeat)}
+                    className={cn(discreteInputClass, "w-32 bg-transparent")}
+                  >
+                    {REPEAT_OPTIONS.map((o) => (
+                      <option key={o.value} value={o.value}>{o.label}</option>
+                    ))}
+                  </select>
+                </div>
 
                 {/* Jira-style metadata rows. Blank = AI infers. */}
                 <div className="grid gap-1 pt-2 border-t">

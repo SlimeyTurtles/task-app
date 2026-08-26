@@ -19,6 +19,7 @@ import {
   Users,
   KeyRound,
   Wand,
+  ScrollText,
   type LucideIcon,
 } from "lucide-react";
 
@@ -62,6 +63,7 @@ export const NAV: NavSection[] = [
     items: [
       { href: "/metrics", label: "Metrics", icon: BarChart3, phase: 5 },
       { href: "/shared", label: "Shared with me", icon: Share2, phase: 6 },
+      { href: "/changelog", label: "Changelog", icon: ScrollText },
     ],
   },
   {

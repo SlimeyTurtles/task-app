@@ -17,6 +17,27 @@ export const PLANNED_FEATURES: string[] = [
 // Newest first. Keep the top entry's version in sync with package.json.
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: "0.9.0",
+    date: "2026-08-26",
+    title: "Recurrence, properly",
+    changes: [
+      { kind: "added", text: "Full recurrence rules: every N days/weeks/months/years, weekday picks, monthly by day or nth weekday, ending never / on a date / after N occurrences." },
+      { kind: "added", text: "Series now live on the calendar: occurrences appear up to a year ahead the moment you save." },
+      { kind: "added", text: "Editing or deleting an occurrence asks whether to change only this event, this and following events, or all events — just like you'd expect." },
+      { kind: "added", text: "Calendar items now have a type: Event or Reminder. Reminders show as compact pills and ring the notification bell at their time." },
+      { kind: "improved", text: "Recurring series can optionally create a to-do per occurrence (the old behavior), now a checkbox at creation." },
+    ],
+  },
+  {
+    version: "0.8.0",
+    date: "2026-08-26",
+    title: "Graceful when the lights go out",
+    changes: [
+      { kind: "added", text: "Clear in-app errors when the database is unreachable: a warning banner when saves fail, and a dedicated error screen with retry for pages that can't load." },
+      { kind: "added", text: "Health endpoint (/api/health) that reports database connectivity." },
+    ],
+  },
+  {
     version: "0.7.0",
     date: "2026-08-26",
     title: "A changelog is born",

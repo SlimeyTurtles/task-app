@@ -77,10 +77,18 @@ async function materializeRule(
   rule: NonNullable<RuleWithTemplate>,
   now: Date,
 ): Promise<number> {
+  const template = rule.task;
+  if (!template) {
+    // Event-only series (no template task) — task materialization does not
+    // apply; the event materializer (commit 3 of the series upgrade) owns it.
+    await db.recurrenceRule.update({
+      where: { id: rule.id },
+      data: { nextMaterializeAt: new Date(now.getTime() + HORIZON_DAYS * 86_400_000) },
+    });
+    return 0;
+  }
   const horizonEnd = new Date(now.getTime() + HORIZON_DAYS * 86_400_000);
-  // DTSTART anchors the recurrence at the template's dueDate if set, else
-  // its createdAt — gives the series a time-of-day to repeat at.
-  const dtstart = rule.task.dueDate ?? rule.task.createdAt;
+  const dtstart = rule.dtstart;
   const exdates = Array.isArray(rule.exdates) ? (rule.exdates as unknown[]).filter((x): x is string => typeof x === "string") : [];
 
   // Start expansion one day after dtstart — the template task already
@@ -117,26 +125,26 @@ async function materializeRule(
       .filter((s): s is string => Boolean(s)),
   );
 
-  const tagIds = rule.task.tags.map((t) => t.tagId);
+  const tagIds = template.tags.map((t) => t.tagId);
   let created = 0;
   for (const occ of occurrences) {
     const dayKey = occ.toISOString().slice(0, 10);
     if (occupied.has(dayKey)) continue;
     await db.task.create({
       data: {
-        userId: rule.task.userId,
+        userId: template.userId,
         templateTaskId: rule.taskId,
-        name: rule.task.name,
-        description: rule.task.description,
-        definitionOfDone: rule.task.definitionOfDone,
-        areaId: rule.task.areaId,
-        projectId: rule.task.projectId,
-        stress: rule.task.stress,
-        valence: rule.task.valence,
-        exhaustion: rule.task.exhaustion,
-        estimatedMinutes: rule.task.estimatedMinutes,
-        importance: rule.task.importance,
-        urgency: rule.task.urgency,
+        name: template.name,
+        description: template.description,
+        definitionOfDone: template.definitionOfDone,
+        areaId: template.areaId,
+        projectId: template.projectId,
+        stress: template.stress,
+        valence: template.valence,
+        exhaustion: template.exhaustion,
+        estimatedMinutes: template.estimatedMinutes,
+        importance: template.importance,
+        urgency: template.urgency,
         dueDate: occ,
         status: TaskStatus.INBOX,
         ...(tagIds.length

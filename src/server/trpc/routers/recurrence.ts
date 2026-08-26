@@ -36,7 +36,7 @@ export const recurrenceRouter = router({
   upsert: protectedProcedure.input(RruleInput).mutation(async ({ ctx, input }) => {
     const task = await ctx.db.task.findFirst({
       where: { id: input.taskId, userId: ctx.session.user.id },
-      select: { id: true },
+      select: { id: true, dueDate: true, createdAt: true },
     });
     if (!task) throw new TRPCError({ code: "NOT_FOUND" });
 
@@ -46,6 +46,7 @@ export const recurrenceRouter = router({
         taskId: input.taskId,
         rrule: input.rrule,
         timezone: input.timezone,
+        dtstart: task.dueDate ?? task.createdAt,
         exdates: input.exdates ?? [],
         nextMaterializeAt: new Date(),
       },
@@ -111,12 +112,11 @@ export const recurrenceRouter = router({
     .query(async ({ ctx, input }) => {
       const rule = await ctx.db.recurrenceRule.findFirst({
         where: { taskId: input.taskId, task: { userId: ctx.session.user.id } },
-        include: { task: { select: { dueDate: true, createdAt: true } } },
       });
       if (!rule) throw new TRPCError({ code: "NOT_FOUND" });
       const now = new Date();
       const farFuture = new Date(now.getTime() + 365 * 86_400_000);
-      const dtstart = rule.task.dueDate ?? rule.task.createdAt;
+      const dtstart = rule.dtstart;
       const exdates = Array.isArray(rule.exdates)
         ? (rule.exdates as unknown[]).filter((x): x is string => typeof x === "string")
         : [];

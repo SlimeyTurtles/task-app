@@ -548,7 +548,7 @@ function registerTools(server: McpServer, userId: string): void {
             title: newName,
             startsAt: slot.start,
             endsAt: slot.end,
-            kind: EventKind.ACTIVE,
+            kind: EventKind.EVENT,
             source: EventSource.SUGGESTED,
             confidence: 1,
             attributions: { create: { taskId: id, weight: 1, ratioUnknown: false } },
@@ -649,7 +649,7 @@ function registerTools(server: McpServer, userId: string): void {
           startsAt: start,
           endsAt: end,
           notes: notes ?? null,
-          kind: EventKind.ACTIVE,
+          kind: EventKind.EVENT,
           source: EventSource.MANUAL,
           confidence: 1,
           attributions: taskIds?.length

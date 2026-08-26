@@ -429,15 +429,20 @@ model TaskDependency {
 
 model RecurrenceRule {
   id                  String   @id @default(cuid())
-  taskId              String   @unique
+  taskId              String?  @unique // template task (when the series clones tasks)
+  templateEventId     String?  @unique // anchor calendar event (first occurrence)
   rrule               String // iCal RRULE string
   timezone            String   @default("UTC")
-  exdates             Json     @default("[]") // exception dates
+  dtstart             DateTime // series anchor; owns the time-of-day
+  exdates             Json     @default("[]") // ISO datetimes (legacy rows: YYYY-MM-DD)
+  materializeTasks    Boolean  @default(false) // clone the template task per occurrence
   nextMaterializeAt   DateTime?
   createdAt           DateTime @default(now())
   updatedAt           DateTime @updatedAt
 
-  task Task @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  task          Task?   @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  templateEvent Event?  @relation("SeriesTemplate", fields: [templateEventId], references: [id], onDelete: SetNull)
+  occurrences   Event[] @relation("SeriesOccurrences")
 }
 
 // ----------------------------------------------------------------------------
@@ -493,7 +498,8 @@ model ProjectTag {
 // ----------------------------------------------------------------------------
 
 enum EventKind {
-  ACTIVE
+  EVENT
+  REMINDER
   BACKGROUND
 }
 
@@ -511,17 +517,29 @@ model Event {
   startsAt   DateTime
   endsAt     DateTime
   notes      String?
-  kind       EventKind   @default(ACTIVE)
+  kind       EventKind   @default(EVENT)
   confidence Float       @default(1.0) // 0..1, derived
   source     EventSource @default(MANUAL)
+  // Series occurrence bookkeeping. originalStartsAt is the slot this row was
+  // materialized for and never changes (dedup key even after drags); detached
+  // marks an occurrence edited with "only this event" scope, which series-wide
+  // edits and re-materialization must skip.
+  seriesId         String?
+  originalStartsAt DateTime?
+  detached         Boolean  @default(false)
   createdAt  DateTime    @default(now())
   updatedAt  DateTime    @updatedAt
 
-  user         User                   @relation(fields: [userId], references: [id], onDelete: Cascade)
-  attributions EventTaskAttribution[]
+  user          User                   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  attributions  EventTaskAttribution[]
+  series        RecurrenceRule?        @relation("SeriesOccurrences", fields: [seriesId], references: [id], onDelete: SetNull)
+  seriesAnchor  RecurrenceRule?        @relation("SeriesTemplate")
+  notifications Notification[]
 
+  @@unique([seriesId, originalStartsAt])
   @@index([userId])
   @@index([startsAt])
+  @@index([seriesId])
 }
 
 model EventTaskAttribution {
@@ -706,6 +724,7 @@ model ExternalAppLink {
 
 enum NotificationType {
   DUE_SOON
+  EVENT_REMINDER
 }
 
 model Notification {
@@ -713,15 +732,18 @@ model Notification {
   userId       String
   type         NotificationType
   taskId       String?
+  eventId      String?
   dueAt        DateTime
   message      String
   dispatchedAt DateTime         @default(now())
   readAt       DateTime?
 
-  user User  @relation(fields: [userId], references: [id], onDelete: Cascade)
-  task Task? @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  user  User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  task  Task?  @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  event Event? @relation(fields: [eventId], references: [id], onDelete: Cascade)
 
   @@unique([userId, type, taskId, dueAt])
+  @@unique([userId, type, eventId, dueAt])
   @@index([userId, readAt])
   @@index([userId, dispatchedAt])
 }

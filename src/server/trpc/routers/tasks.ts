@@ -405,7 +405,7 @@ export const tasksRouter = router({
             title: newName,
             startsAt: slot.start,
             endsAt: slot.end,
-            kind: EventKind.ACTIVE,
+            kind: EventKind.EVENT,
             source: EventSource.SUGGESTED,
             confidence: 1,
             attributions: { create: { taskId: task.id, weight: 1, ratioUnknown: false } },

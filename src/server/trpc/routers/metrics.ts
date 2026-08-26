@@ -21,7 +21,7 @@ export const metricsRouter = router({
       const events = await ctx.db.event.findMany({
         where: {
           userId: ctx.session.user.id,
-          kind: EventKind.ACTIVE,
+          kind: EventKind.EVENT,
           AND: [{ startsAt: { lte: input.end } }, { endsAt: { gte: input.start } }],
         },
         select: {
@@ -87,7 +87,7 @@ export const metricsRouter = router({
       const events = await ctx.db.event.findMany({
         where: {
           userId: ctx.session.user.id,
-          kind: EventKind.ACTIVE,
+          kind: EventKind.EVENT,
           AND: [{ startsAt: { lte: input.end } }, { endsAt: { gte: input.start } }],
         },
         select: {

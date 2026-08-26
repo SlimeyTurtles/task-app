@@ -72,7 +72,12 @@ export function RecurringClient() {
         <p className="text-sm text-muted-foreground mt-6">Loading templates…</p>
       ) : rules && rules.length > 0 ? (
         <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4 mt-6">
-          {rules.map((rule) => {
+          {rules
+            .filter(
+              (r): r is (typeof r) & { taskId: string; task: NonNullable<(typeof r)["task"]> } =>
+                r.taskId != null && r.task != null,
+            )
+            .map((rule) => {
             const paused = rule.nextMaterializeAt == null;
             return (
               <Card key={rule.id} className={paused ? "opacity-70" : undefined}>

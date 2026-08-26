@@ -59,7 +59,7 @@ export const recommendationsRouter = router({
         ctx.db.event.findMany({
           where: {
             userId,
-            kind: EventKind.ACTIVE,
+            kind: EventKind.EVENT,
             AND: [{ startsAt: { lte: rangeEnd } }, { endsAt: { gte: now } }],
           },
           select: {
@@ -196,7 +196,7 @@ export const recommendationsRouter = router({
               userId,
               startsAt: item.startsAt,
               endsAt: item.endsAt,
-              kind: EventKind.ACTIVE,
+              kind: EventKind.EVENT,
               source: "SUGGESTED",
               confidence: 1,
               attributions: { create: { taskId: item.taskId, weight: 1 } },

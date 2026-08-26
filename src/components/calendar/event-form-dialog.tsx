@@ -409,7 +409,7 @@ export function EventFormDialog({ state, onClose }: { state: EventDialogState; o
           startsAt: startAt,
           endsAt: endAt,
           notes: notes.trim() || null,
-          kind: EventKind.ACTIVE,
+          kind: EventKind.EVENT,
           lazy,
           attributions: taskIds.map((id) => ({ taskId: id, weight: 1, ratioUnknown: false })),
         });

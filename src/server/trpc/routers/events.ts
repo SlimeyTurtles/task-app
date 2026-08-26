@@ -22,7 +22,7 @@ const EventInput = z.object({
   startsAt: z.date(),
   endsAt: z.date(),
   notes: z.string().max(5000).nullish(),
-  kind: z.nativeEnum(EventKind).default(EventKind.ACTIVE),
+  kind: z.nativeEnum(EventKind).default(EventKind.EVENT),
   source: z.nativeEnum(EventSource).default(EventSource.MANUAL),
   /** When true (or wide-window heuristic kicks in), confidence drops to 0.3 — see design doc §4.1 "lazy log". */
   lazy: z.boolean().default(false),
@@ -230,7 +230,7 @@ export const eventsRouter = router({
           userId: ctx.session.user.id,
           startsAt: input.startsAt,
           endsAt: input.endsAt,
-          kind: EventKind.ACTIVE,
+          kind: EventKind.EVENT,
           source: EventSource.QUICK_LOG,
           confidence,
           attributions: { create: { taskId: input.taskId, weight: 1, ratioUnknown: false } },
@@ -269,7 +269,7 @@ export const eventsRouter = router({
           userId: ctx.session.user.id,
           startsAt: start,
           endsAt,
-          kind: EventKind.ACTIVE,
+          kind: EventKind.EVENT,
           source: EventSource.QUICK_LOG,
           confidence: 1,
           attributions: { create: { taskId: input.taskId, weight: 1, ratioUnknown: false } },
@@ -437,7 +437,7 @@ export const eventsRouter = router({
           title: input.title,
           startsAt: start,
           endsAt: end,
-          kind: EventKind.ACTIVE,
+          kind: EventKind.EVENT,
           source,
           confidence: input.lazy ? 0.3 : 1,
           ...(taskId
@@ -458,12 +458,14 @@ export const eventsRouter = router({
               taskId,
               rrule,
               timezone: "UTC",
+              dtstart: start,
               exdates: [],
               nextMaterializeAt: new Date(),
             },
             update: {
               rrule,
               timezone: "UTC",
+              dtstart: start,
               nextMaterializeAt: new Date(),
             },
           });
@@ -491,7 +493,7 @@ export const eventsRouter = router({
 
 /**
  * First gap of `durationMin` inside the user's scheduling window that no
- * busy interval occupies. `busy` should be the union of ACTIVE events and
+ * busy interval occupies. `busy` should be the union of EVENT-kind events and
  * (when respectTimeBlocks is on) non-schedulableOnTop time blocks.
  *
  * Day boundaries + hours-of-day use the server's local time — set the
@@ -541,7 +543,7 @@ export function findFreeSlot(
 }
 
 /**
- * Build the full "busy" list for the auto-scheduler: ACTIVE events plus
+ * Build the full "busy" list for the auto-scheduler: EVENT-kind events plus
  * (optionally) the user's time blocks expanded over the horizon. Blocks
  * with schedulableOnTop=true (work-hours, focus, etc. the user marks as
  * "the planner can still place tasks here") are skipped.
@@ -557,7 +559,7 @@ export async function gatherBusy(
   const events = await db.event.findMany({
     where: {
       userId,
-      kind: EventKind.ACTIVE,
+      kind: EventKind.EVENT,
       AND: [{ startsAt: { lt: horizonEnd } }, { endsAt: { gt: now } }],
     },
     select: { startsAt: true, endsAt: true },

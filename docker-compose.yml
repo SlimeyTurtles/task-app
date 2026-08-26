@@ -59,10 +59,15 @@ services:
       TZ: ${TZ:-America/Los_Angeles}
     ports:
       - "${WEB_PORT:-3002}:3000"
-    # First boot: bring an empty volume up to schema, then start the
-    # standalone server. `prisma db push` is idempotent on subsequent boots.
+    # Schema management moved from `db push` to migrations (recurrence v2
+    # needed a data-preserving enum swap + backfill that push can't express).
+    # Order matters: plain `migrate deploy` succeeds on a fresh database
+    # (applies baseline + all migrations). On a database created by the old
+    # db-push flow it fails on the baseline (tables already exist, rolled
+    # back) — then we mark the baseline as already applied and deploy again.
     command: >
-      sh -c "prisma db push --skip-generate &&
+      sh -c "(prisma migrate deploy ||
+             (prisma migrate resolve --applied 0_baseline && prisma migrate deploy)) &&
              node server.js"
 
   # The bullmq calibration worker isn't bundled into the standalone output

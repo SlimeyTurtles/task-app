@@ -14,8 +14,9 @@ import {
 import { trpc } from "@/lib/trpc/client";
 
 type Rule = {
-  taskId: string;
-  task: { name: string };
+  id: string;
+  task: { name: string } | null;
+  templateEvent: { title: string | null } | null;
 };
 
 type Scope = "rule_only" | "future" | "all";
@@ -44,7 +45,11 @@ export function DeleteRuleDialog({ rule, onClose }: { rule: Rule | null; onClose
 
   const del = trpc.recurrence.delete.useMutation({
     onSuccess: async () => {
-      await Promise.all([utils.recurrence.list.invalidate(), utils.tasks.list.invalidate()]);
+      await Promise.all([
+        utils.recurrence.list.invalidate(),
+        utils.tasks.list.invalidate(),
+        utils.events.list.invalidate(),
+      ]);
       toast.success("Recurrence removed.");
       onClose();
     },
@@ -55,7 +60,9 @@ export function DeleteRuleDialog({ rule, onClose }: { rule: Rule | null; onClose
     <Dialog open={rule != null} onOpenChange={(o) => (o ? null : onClose())}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle>Delete &ldquo;{rule?.task.name}&rdquo; template</DialogTitle>
+          <DialogTitle>
+            Delete &ldquo;{rule?.task?.name ?? rule?.templateEvent?.title ?? "Untitled series"}&rdquo; template
+          </DialogTitle>
         </DialogHeader>
         <div className="grid gap-2">
           {OPTIONS.map((o) => (
@@ -84,7 +91,7 @@ export function DeleteRuleDialog({ rule, onClose }: { rule: Rule | null; onClose
           <Button
             variant="destructive"
             disabled={del.isPending}
-            onClick={() => rule && del.mutate({ taskId: rule.taskId, scope })}
+            onClick={() => rule && del.mutate({ ruleId: rule.id, scope })}
           >
             Delete
           </Button>

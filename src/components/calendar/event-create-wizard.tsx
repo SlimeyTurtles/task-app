@@ -14,7 +14,9 @@ import { TagPicker } from "@/components/tasks/tag-picker";
 import { cn } from "@/lib/utils";
 import { trpc } from "@/lib/trpc/client";
 import { dateToInputValue, inputValueToDate } from "@/lib/format";
-import { REPEAT_OPTIONS, type Repeat } from "@/lib/recurrence";
+import { REPEAT_OPTIONS, repeatToPattern, type Repeat, type RecurrencePattern } from "@/lib/recurrence";
+import { RecurrenceEditor } from "@/components/recurring/recurrence-editor";
+import { Switch } from "@/components/ui/switch";
 
 export type WizardInit = {
   startsAt?: Date;
@@ -117,6 +119,9 @@ export function EventCreateWizard({
   const [startTime, setStartTime] = useState("09:00");
   const [endDate, setEndDate] = useState("");
   const [endTime, setEndTime] = useState("10:00");
+  const [pattern, setPattern] = useState<RecurrencePattern | null>(null);
+  const [kind, setKind] = useState<"EVENT" | "REMINDER">("EVENT");
+  const [seriesTasks, setSeriesTasks] = useState(true);
 
   const streamAbort = useRef<AbortController | null>(null);
   const debounceTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -130,6 +135,9 @@ export function EventCreateWizard({
     setStreaming(false);
     setTagIds([]);
     setTitle("");
+    setPattern(null);
+    setKind(init?.kind === EventKind.REMINDER ? "REMINDER" : "EVENT");
+    setSeriesTasks(true);
     if (init?.pickedTime && init.startsAt && init.endsAt) {
       setWhenMode("manual");
       setStartDate(dateToInputValue(init.startsAt));
@@ -283,6 +291,7 @@ export function EventCreateWizard({
 
   function goToConfirm() {
     setTitle(draft.title.value || description.trim().split("\n")[0].slice(0, 80));
+    setPattern((p) => p ?? repeatToPattern(draft.repeat.value));
     setStep("confirm");
   }
 
@@ -313,12 +322,15 @@ export function EventCreateWizard({
         urgency: draft.urgency.value ?? null,
         dueDate: null,
         attachTaskId: null,
-        createTask: true,
+        createTask: kind === "EVENT",
         tagIds: tagIds.length ? tagIds : undefined,
         startsAt: whenMode === "manual" ? startAt : null,
         endsAt: whenMode === "manual" ? endAt : null,
         lazy: false,
-        repeat: draft.repeat.value,
+        recurrence: pattern,
+        kind: kind === "REMINDER" ? EventKind.REMINDER : EventKind.EVENT,
+        materializeTasks: kind === "EVENT" && seriesTasks,
+        timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
       });
       await Promise.all([utils.events.list.invalidate(), utils.tasks.list.invalidate()]);
       toast.success("Scheduled.");
@@ -356,6 +368,12 @@ export function EventCreateWizard({
           )}
           {step === "confirm" && (
             <ConfirmStep
+              pattern={pattern}
+              setPattern={setPattern}
+              kind={kind}
+              setKind={setKind}
+              seriesTasks={seriesTasks}
+              setSeriesTasks={setSeriesTasks}
               title={title}
               setTitle={setTitle}
               draft={draft}
@@ -598,6 +616,9 @@ function ConfirmStep({
   endTime, setEndTime,
   tagIds, setTagIds,
   forceManual,
+  pattern, setPattern,
+  kind, setKind,
+  seriesTasks, setSeriesTasks,
 }: {
   title: string;
   setTitle: (s: string) => void;
@@ -612,12 +633,45 @@ function ConfirmStep({
   tagIds: string[];
   setTagIds: (ids: string[]) => void;
   forceManual: boolean;
+  pattern: RecurrencePattern | null;
+  setPattern: (p: RecurrencePattern | null) => void;
+  kind: "EVENT" | "REMINDER";
+  setKind: (k: "EVENT" | "REMINDER") => void;
+  seriesTasks: boolean;
+  setSeriesTasks: (b: boolean) => void;
 }) {
+  const anchor = combine(startDate, startTime) ?? new Date();
   return (
     <div className="grid gap-4">
       <div className="grid gap-1.5">
         <Label htmlFor="wiz-title" className="text-xs text-muted-foreground">Title</Label>
         <Input id="wiz-title" value={title} onChange={(e) => setTitle(e.target.value)} className="h-10" />
+      </div>
+
+      <div className="grid gap-1.5">
+        <Label className="text-xs text-muted-foreground">Type</Label>
+        <div className="inline-flex rounded-lg border p-0.5 w-full">
+          <button
+            type="button"
+            onClick={() => setKind("EVENT")}
+            className={cn(
+              "flex-1 px-2 py-1 text-xs rounded-md",
+              kind === "EVENT" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground",
+            )}
+          >
+            Event
+          </button>
+          <button
+            type="button"
+            onClick={() => setKind("REMINDER")}
+            className={cn(
+              "flex-1 px-2 py-1 text-xs rounded-md",
+              kind === "REMINDER" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground",
+            )}
+          >
+            Reminder
+          </button>
+        </div>
       </div>
 
       <div className="grid grid-cols-2 gap-3">
@@ -650,18 +704,19 @@ function ConfirmStep({
         </div>
         <div className="grid gap-1.5">
           <Label htmlFor="wiz-repeat" className="text-xs text-muted-foreground">Repeats</Label>
-          <select
-            id="wiz-repeat"
-            value={draft.repeat.value}
-            onChange={(e) => setDraft((d) => ({ ...d, repeat: { value: e.target.value as Repeat, confidence: 1 } }))}
-            className="h-10 rounded-md border border-input bg-transparent px-2 text-sm"
-          >
-            {REPEAT_OPTIONS.map((o) => (
-              <option key={o.value} value={o.value}>{o.label}</option>
-            ))}
-          </select>
+          <RecurrenceEditor value={pattern} onChange={setPattern} anchor={anchor} selectId="wiz-repeat" />
         </div>
       </div>
+
+      {pattern && kind === "EVENT" ? (
+        <label className="flex items-center justify-between gap-3 rounded-lg border bg-muted/30 px-3 py-2">
+          <span className="text-xs">
+            <span className="font-medium">Series creates tasks</span>
+            <span className="text-muted-foreground"> — each occurrence gets its own to-do</span>
+          </span>
+          <Switch checked={seriesTasks} onCheckedChange={setSeriesTasks} />
+        </label>
+      ) : null}
 
       {whenMode === "manual" && (
         <div className="grid grid-cols-2 gap-3">

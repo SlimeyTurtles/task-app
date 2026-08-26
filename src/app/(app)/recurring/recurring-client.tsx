@@ -2,14 +2,14 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { Pause, Pencil, Play, PlayCircle, Trash2 } from "lucide-react";
+import { BellRing, Pause, Pencil, Play, PlayCircle, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { trpc } from "@/lib/trpc/client";
 import { RotatingTagline } from "@/components/app/rotating-tagline";
-import { repeatLabel } from "@/lib/recurrence";
+import { describeRrule } from "@/lib/recurrence";
 import { EditRruleDialog } from "@/components/recurring/edit-rrule-dialog";
 import { DeleteRuleDialog } from "@/components/recurring/delete-rule-dialog";
 
@@ -23,16 +23,18 @@ const RECURRING_EMPTY = [
 
 type ListItem = {
   id: string;
-  taskId: string;
+  taskId: string | null;
   rrule: string;
   timezone: string;
+  dtstart: Date;
   nextMaterializeAt: Date | null;
   task: {
     id: string;
     name: string;
     dueDate: Date | null;
     area: { id: string; name: string; color: string | null } | null;
-  };
+  } | null;
+  templateEvent: { id: string; title: string | null; startsAt: Date; kind: string } | null;
 };
 
 export function RecurringClient() {
@@ -46,7 +48,8 @@ export function RecurringClient() {
     onError: (e) => toast.error(e.message),
   });
   const resume = trpc.recurrence.resume.useMutation({
-    onSuccess: () => utils.recurrence.list.invalidate(),
+    onSuccess: () =>
+      Promise.all([utils.recurrence.list.invalidate(), utils.events.list.invalidate()]),
     onError: (e) => toast.error(e.message),
   });
   const materialize = trpc.recurrence.materializeNow.useMutation({
@@ -64,7 +67,7 @@ export function RecurringClient() {
     <>
       <div className="flex items-center justify-between">
         <p className="text-xs text-muted-foreground">
-          Add a Repeats option on any new event in the calendar to start a template.
+          Add a Repeats option on any new event in the calendar to start a series.
         </p>
         <Button size="sm" variant="outline" onClick={() => materialize.mutate()}>
           <PlayCircle className="size-4" /> Run materializer
@@ -75,32 +78,34 @@ export function RecurringClient() {
         <p className="text-sm text-muted-foreground mt-6">Loading templates…</p>
       ) : rules && rules.length > 0 ? (
         <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4 mt-6">
-          {rules
-            .filter(
-              (r): r is (typeof r) & { taskId: string; task: NonNullable<(typeof r)["task"]> } =>
-                r.taskId != null && r.task != null,
-            )
-            .map((rule) => {
+          {rules.map((rule) => {
             const paused = rule.nextMaterializeAt == null;
+            const name = rule.task?.name ?? rule.templateEvent?.title ?? "Untitled series";
+            const isReminder = rule.templateEvent?.kind === "REMINDER";
             return (
               <Card key={rule.id} className={paused ? "opacity-70" : undefined}>
                 <CardHeader className="flex flex-row items-start justify-between gap-2">
                   <div className="min-w-0 flex items-start gap-2">
-                    {rule.task.area?.color ? (
+                    {rule.task?.area?.color ? (
                       <span
                         className="mt-1 size-3 rounded-full shrink-0"
                         style={{ backgroundColor: rule.task.area.color }}
                       />
                     ) : null}
                     <div className="min-w-0">
-                      <CardTitle className="truncate">
-                        <Link href={`/tasks?id=${rule.taskId}`} className="hover:underline">
-                          {rule.task.name}
-                        </Link>
+                      <CardTitle className="truncate flex items-center gap-1.5">
+                        {isReminder ? <BellRing className="size-3.5 text-primary shrink-0" /> : null}
+                        {rule.taskId ? (
+                          <Link href={`/tasks?id=${rule.taskId}`} className="hover:underline truncate">
+                            {name}
+                          </Link>
+                        ) : (
+                          <span className="truncate">{name}</span>
+                        )}
                       </CardTitle>
                       <p className="text-xs text-muted-foreground mt-1">
-                        {repeatLabel(rule.rrule)}
-                        {rule.task.area ? ` · ${rule.task.area.name}` : ""}
+                        {describeRrule(rule.rrule)}
+                        {rule.task?.area ? ` · ${rule.task.area.name}` : ""}
                         {paused ? " · paused" : ""}
                       </p>
                     </div>
@@ -112,9 +117,7 @@ export function RecurringClient() {
                     <Button
                       variant="ghost"
                       size="icon"
-                      onClick={() =>
-                        (paused ? resume : pause).mutate({ taskId: rule.taskId })
-                      }
+                      onClick={() => (paused ? resume : pause).mutate({ ruleId: rule.id })}
                     >
                       {paused ? <Play className="size-4" /> : <Pause className="size-4" />}
                     </Button>
@@ -124,7 +127,7 @@ export function RecurringClient() {
                   </div>
                 </CardHeader>
                 <CardContent className="text-xs text-muted-foreground">
-                  <PreviewList taskId={rule.taskId} />
+                  <PreviewList ruleId={rule.id} />
                 </CardContent>
               </Card>
             );
@@ -153,8 +156,8 @@ export function RecurringClient() {
   );
 }
 
-function PreviewList({ taskId }: { taskId: string }) {
-  const { data, isLoading } = trpc.recurrence.preview.useQuery({ taskId, count: 5 });
+function PreviewList({ ruleId }: { ruleId: string }) {
+  const { data, isLoading } = trpc.recurrence.preview.useQuery({ ruleId, count: 5 });
   if (isLoading) return <p>Loading next dates…</p>;
   if (!data || data.length === 0) return <p>No upcoming occurrences.</p>;
   return (

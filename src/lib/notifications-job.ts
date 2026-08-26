@@ -12,7 +12,11 @@
  * notification up once quiet hours end.
  */
 
-import { NotificationType, TaskStatus, type PrismaClient } from "@prisma/client";
+import { EventKind, NotificationType, TaskStatus, type PrismaClient } from "@prisma/client";
+
+/** Reminders fire "at their time": catch slots up to the next tick, with a grace window for worker downtime. */
+const REMINDER_LOOKAHEAD_MS = 5 * 60_000;
+const REMINDER_GRACE_MS = 60 * 60_000;
 
 export type EffectivePrefs = {
   leadMinutes: number;
@@ -60,18 +64,46 @@ export async function dispatchForUser(
     },
     select: { id: true, name: true, dueDate: true },
   });
-  if (candidates.length === 0) return { created: 0 };
 
-  const rows = candidates.map((t) => ({
-    userId,
-    type: NotificationType.DUE_SOON,
-    taskId: t.id,
-    dueAt: t.dueDate!,
-    message: renderMessage(t.name, t.dueDate!, now),
-  }));
+  let created = 0;
+  if (candidates.length > 0) {
+    const rows = candidates.map((t) => ({
+      userId,
+      type: NotificationType.DUE_SOON,
+      taskId: t.id,
+      dueAt: t.dueDate!,
+      message: renderMessage(t.name, t.dueDate!, now),
+    }));
+    const { count } = await db.notification.createMany({ data: rows, skipDuplicates: true });
+    created += count;
+  }
 
-  const { count } = await db.notification.createMany({ data: rows, skipDuplicates: true });
-  return { created: count };
+  const reminders = await db.event.findMany({
+    where: {
+      userId,
+      kind: EventKind.REMINDER,
+      startsAt: {
+        gt: new Date(now.getTime() - REMINDER_GRACE_MS),
+        lte: new Date(now.getTime() + REMINDER_LOOKAHEAD_MS),
+      },
+    },
+    select: { id: true, title: true, startsAt: true },
+  });
+  if (reminders.length > 0) {
+    const { count } = await db.notification.createMany({
+      data: reminders.map((e) => ({
+        userId,
+        type: NotificationType.EVENT_REMINDER,
+        eventId: e.id,
+        dueAt: e.startsAt,
+        message: `Reminder: ${e.title ?? "Untitled"}`,
+      })),
+      skipDuplicates: true,
+    });
+    created += count;
+  }
+
+  return { created };
 }
 
 export async function getEffectivePrefs(db: PrismaClient, userId: string): Promise<EffectivePrefs> {

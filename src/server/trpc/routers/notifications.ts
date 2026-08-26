@@ -21,7 +21,7 @@ export const notificationsRouter = router({
         where: { userId, readAt: null },
         orderBy: { dueAt: "asc" },
         take: 20,
-        include: { task: { select: { id: true, name: true } } },
+        include: { task: { select: { id: true, name: true } }, event: { select: { id: true, title: true, startsAt: true } } },
       }),
     ]);
     return { count, items };
@@ -32,7 +32,7 @@ export const notificationsRouter = router({
       where: { userId: ctx.session.user.id },
       orderBy: { dispatchedAt: "desc" },
       take: 50,
-      include: { task: { select: { id: true, name: true } } },
+      include: { task: { select: { id: true, name: true } }, event: { select: { id: true, title: true, startsAt: true } } },
     });
   }),
 

@@ -69,7 +69,7 @@ export function NotificationsBell() {
             {items.map((n) => (
               <Link
                 key={n.id}
-                href={n.taskId ? `/tasks?id=${n.taskId}` : "/tasks"}
+                href={n.eventId ? "/calendar" : n.taskId ? `/tasks?id=${n.taskId}` : "/tasks"}
                 onClick={() => markRead.mutate({ id: n.id })}
                 className="block px-3 py-2 hover:bg-accent/40 transition-colors"
               >

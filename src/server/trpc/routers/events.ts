@@ -9,7 +9,9 @@ import { applyFactDeltas } from "@/server/lib/apply-fact-deltas";
 import { gatherUserContext } from "@/server/lib/context";
 import { expandRecurring } from "./time-blocks";
 import { getSchedulingSettings } from "./settings";
-import { repeatToRrule, type Repeat } from "@/lib/recurrence";
+import { repeatToPattern, buildRrule, RecurrencePatternSchema, type Repeat } from "@/lib/recurrence";
+import { materializeSeries } from "@/lib/recurrence-job";
+import { applyOccurrenceEdit, deleteOccurrenceWithScope } from "@/lib/series-edit";
 
 const AttributionInput = z.object({
   taskId: z.string(),
@@ -59,6 +61,7 @@ export const eventsRouter = router({
       },
       orderBy: { startsAt: "asc" },
       include: {
+        series: { select: { id: true, rrule: true, timezone: true, dtstart: true } },
         attributions: {
           include: {
             task: {
@@ -207,6 +210,34 @@ export const eventsRouter = router({
     }),
 
   /**
+   * Edit one occurrence of a recurring series with Google-Calendar scopes.
+   * Falls back to a plain single-event edit for non-series rows.
+   */
+  updateOccurrence: protectedProcedure
+    .input(
+      z.object({
+        id: z.string(),
+        scope: z.enum(["this", "following", "all"]),
+        title: z.string().trim().max(300).nullish(),
+        startsAt: z.date().optional(),
+        endsAt: z.date().optional(),
+        notes: z.string().max(5000).nullish(),
+        kind: z.nativeEnum(EventKind).optional(),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      const { id, scope, ...patch } = input;
+      return applyOccurrenceEdit(ctx.db, ctx.session.user.id, id, scope, patch);
+    }),
+
+  deleteOccurrence: protectedProcedure
+    .input(z.object({ id: z.string(), scope: z.enum(["this", "following", "all"]) }))
+    .mutation(async ({ ctx, input }) => {
+      await deleteOccurrenceWithScope(ctx.db, ctx.session.user.id, input.id, input.scope);
+      return { ok: true };
+    }),
+
+  /**
    * Quick log: drop a single task into a time window. Used by drag-from-inbox.
    * If `lazy` is true (or window >4h), confidence will be 0.3.
    */
@@ -303,7 +334,13 @@ export const eventsRouter = router({
         startsAt: z.date().nullish(),
         endsAt: z.date().nullish(),
         lazy: z.boolean().default(false),
+        /** Preset path (kept for the AI draft route); `recurrence` wins when both are set. */
         repeat: z.enum(["none", "daily", "weekdays", "weekly"]).default("none"),
+        recurrence: RecurrencePatternSchema.nullish(),
+        timezone: z.string().max(64).default("UTC"),
+        kind: z.enum([EventKind.EVENT, EventKind.REMINDER]).default(EventKind.EVENT),
+        /** Whether series occurrences clone the task. Defaults to "has a task". */
+        materializeTasks: z.boolean().optional(),
       }),
     )
     .mutation(async ({ ctx, input }) => {
@@ -437,7 +474,7 @@ export const eventsRouter = router({
           title: input.title,
           startsAt: start,
           endsAt: end,
-          kind: EventKind.EVENT,
+          kind: input.kind,
           source,
           confidence: input.lazy ? 0.3 : 1,
           ...(taskId
@@ -446,36 +483,35 @@ export const eventsRouter = router({
         },
       });
 
-      // Persist a RecurrenceRule on the task when the user picked a Repeats
-      // option. The first occurrence is the event we just created; the
-      // materializer will fill in future ones on its next tick.
-      if (taskId && input.repeat !== "none") {
-        const rrule = repeatToRrule(input.repeat as Repeat);
-        if (rrule) {
-          await ctx.db.recurrenceRule.upsert({
-            where: { taskId },
-            create: {
-              taskId,
-              rrule,
-              timezone: "UTC",
-              dtstart: start,
-              exdates: [],
-              nextMaterializeAt: new Date(),
-            },
-            update: {
-              rrule,
-              timezone: "UTC",
-              dtstart: start,
-              nextMaterializeAt: new Date(),
-            },
-          });
-          // Also push the template task's dueDate up to the event's start so
-          // the materializer's RRULE expansion uses the right anchor.
-          await ctx.db.task.update({
-            where: { id: taskId },
-            data: { dueDate: start },
-          });
-        }
+      // Persist a RecurrenceRule anchored on this event when a repeat pattern
+      // was chosen, then materialize inline so future occurrences appear on
+      // the calendar immediately.
+      const pattern = input.recurrence ?? repeatToPattern(input.repeat as Repeat);
+      if (pattern) {
+        const rrule = buildRrule(pattern, start, input.timezone);
+        const materializeTasks = input.materializeTasks ?? taskId != null;
+        const ruleData = {
+          rrule,
+          timezone: input.timezone,
+          dtstart: start,
+          templateEventId: event.id,
+          materializeTasks: materializeTasks && taskId != null,
+          nextMaterializeAt: new Date(),
+        };
+        // A task can anchor at most one rule; reuse it if present.
+        const existingRule = taskId
+          ? await ctx.db.recurrenceRule.findUnique({ where: { taskId } })
+          : null;
+        const rule = existingRule
+          ? await ctx.db.recurrenceRule.update({ where: { id: existingRule.id }, data: ruleData })
+          : await ctx.db.recurrenceRule.create({
+              data: { ...ruleData, taskId: materializeTasks ? taskId : null },
+            });
+        await ctx.db.event.update({
+          where: { id: event.id },
+          data: { seriesId: rule.id, originalStartsAt: start },
+        });
+        await materializeSeries(ctx.db, rule.id);
       }
 
       // Best-effort: write any second-brain updates the AI proposed.

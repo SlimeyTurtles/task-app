@@ -50,9 +50,12 @@ export function RecurringClient() {
     onError: (e) => toast.error(e.message),
   });
   const materialize = trpc.recurrence.materializeNow.useMutation({
-    onSuccess: ({ rules, created }) => {
-      toast.success(`Materialized ${created} task${created === 1 ? "" : "s"} across ${rules} rule${rules === 1 ? "" : "s"}.`);
+    onSuccess: ({ rules, events, tasks }) => {
+      toast.success(
+        `Materialized ${events} event${events === 1 ? "" : "s"} and ${tasks} task${tasks === 1 ? "" : "s"} across ${rules} rule${rules === 1 ? "" : "s"}.`,
+      );
       void utils.tasks.list.invalidate();
+      void utils.events.list.invalidate();
     },
     onError: (e) => toast.error(e.message),
   });

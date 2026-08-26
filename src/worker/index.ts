@@ -61,10 +61,10 @@ const recurrenceWorker = new Worker(
   RECURRENCE_QUEUE,
   async (job: Job) => {
     const started = Date.now();
-    const { rules, created } = await materializeAll(db);
+    const { rules, events, tasks } = await materializeAll(db);
     const ms = Date.now() - started;
-    console.log(`[worker] ${job.name} ✓ rules=${rules} created=${created} (${ms}ms)`);
-    return { rules, created, ms };
+    console.log(`[worker] ${job.name} ✓ rules=${rules} events=${events} tasks=${tasks} (${ms}ms)`);
+    return { rules, events, tasks, ms };
   },
   { connection, concurrency: 1 },
 );

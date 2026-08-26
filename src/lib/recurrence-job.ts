@@ -1,164 +1,236 @@
 /**
  * Side-effecting recurrence materializer — called by the BullMQ worker
- * nightly and by the manual `recurrence.materializeNow` tRPC procedure.
+ * nightly, by the manual `recurrence.materializeNow` tRPC procedure, and
+ * inline by mutations that create/update a series (so occurrences appear on
+ * the calendar immediately).
  *
  * For each RecurrenceRule whose nextMaterializeAt has passed (paused rules
  * have nextMaterializeAt = null and are skipped), expand the RRULE forward
- * HORIZON_DAYS and clone the template Task into an INBOX row per occurrence,
- * with templateTaskId set + dueDate = occurrence start. Idempotent: existing
- * children with the same (templateTaskId, dueDate calendar day) are skipped.
+ * HORIZON_DAYS (capped at MAX_OCCURRENCES_PER_SERIES) and create per
+ * occurrence:
+ *  - an Event cloned from the rule's templateEvent (seriesId +
+ *    originalStartsAt set; originalStartsAt is the immutable dedup key, so
+ *    detached/dragged occurrences keep their slot and are never recreated);
+ *  - when materializeTasks, a Task cloned from the template task (dueDate =
+ *    occurrence), attributed to the occurrence event.
+ *
+ * Task-only rules (no templateEvent — legacy or created from the tasks UI)
+ * materialize just the task clones, deduped by the slot's dueDate instant.
  */
 
-import { TaskStatus, type PrismaClient } from "@prisma/client";
+import { Prisma, TaskStatus, type PrismaClient } from "@prisma/client";
 
 import { materializeOccurrences } from "@/lib/recurrence";
 
-export const HORIZON_DAYS = 14;
+export const HORIZON_DAYS = 365;
+export const MAX_OCCURRENCES_PER_SERIES = 100;
+
+export type MaterializeResult = { rules: number; events: number; tasks: number };
 
 export async function materializeForUser(
   db: PrismaClient,
   userId: string,
   now: Date = new Date(),
-): Promise<{ rules: number; created: number }> {
-  const rules = await db.recurrenceRule.findMany({
-    where: {
-      nextMaterializeAt: { lte: now },
-      task: { userId },
-    },
-    include: {
-      task: {
-        include: { tags: { select: { tagId: true } } },
-      },
-    },
-  });
-
-  let created = 0;
-  for (const rule of rules) {
-    created += await materializeRule(db, rule, now);
-  }
-  return { rules: rules.length, created };
+): Promise<MaterializeResult> {
+  return materializeWhere(
+    db,
+    { nextMaterializeAt: { lte: now }, OR: [{ task: { userId } }, { templateEvent: { userId } }] },
+    now,
+  );
 }
 
 export async function materializeAll(
   db: PrismaClient,
   now: Date = new Date(),
-): Promise<{ rules: number; created: number }> {
-  const rules = await db.recurrenceRule.findMany({
-    where: { nextMaterializeAt: { lte: now } },
-    include: {
-      task: {
-        include: { tags: { select: { tagId: true } } },
-      },
-    },
-  });
-
-  let created = 0;
-  for (const rule of rules) {
-    created += await materializeRule(db, rule, now);
-  }
-  return { rules: rules.length, created };
+): Promise<MaterializeResult> {
+  return materializeWhere(db, { nextMaterializeAt: { lte: now } }, now);
 }
 
-type RuleWithTemplate = Awaited<ReturnType<typeof loadRule>>;
+async function materializeWhere(
+  db: PrismaClient,
+  where: Prisma.RecurrenceRuleWhereInput,
+  now: Date,
+): Promise<MaterializeResult> {
+  const rules = await db.recurrenceRule.findMany({ where, select: { id: true } });
+  const totals: MaterializeResult = { rules: rules.length, events: 0, tasks: 0 };
+  for (const rule of rules) {
+    const r = await materializeSeries(db, rule.id, now);
+    totals.events += r.events;
+    totals.tasks += r.tasks;
+  }
+  return totals;
+}
 
-async function loadRule(db: PrismaClient, ruleId: string) {
-  return db.recurrenceRule.findUniqueOrThrow({
+/** Materialize one series now. Idempotent; safe to call inline from mutations. */
+export async function materializeSeries(
+  db: PrismaClient,
+  ruleId: string,
+  now: Date = new Date(),
+): Promise<{ events: number; tasks: number }> {
+  const rule = await db.recurrenceRule.findUnique({
     where: { id: ruleId },
     include: {
-      task: {
-        include: { tags: { select: { tagId: true } } },
-      },
+      task: { include: { tags: { select: { tagId: true } } } },
+      templateEvent: true,
     },
   });
-}
+  if (!rule) return { events: 0, tasks: 0 };
 
-async function materializeRule(
-  db: PrismaClient,
-  rule: NonNullable<RuleWithTemplate>,
-  now: Date,
-): Promise<number> {
-  const template = rule.task;
-  if (!template) {
-    // Event-only series (no template task) — task materialization does not
-    // apply; the event materializer (commit 3 of the series upgrade) owns it.
-    await db.recurrenceRule.update({
-      where: { id: rule.id },
-      data: { nextMaterializeAt: new Date(now.getTime() + HORIZON_DAYS * 86_400_000) },
-    });
-    return 0;
-  }
   const horizonEnd = new Date(now.getTime() + HORIZON_DAYS * 86_400_000);
-  const dtstart = rule.dtstart;
-  const exdates = Array.isArray(rule.exdates) ? (rule.exdates as unknown[]).filter((x): x is string => typeof x === "string") : [];
+  const from = new Date(Math.max(now.getTime(), rule.dtstart.getTime()));
+  const exdates = Array.isArray(rule.exdates)
+    ? (rule.exdates as unknown[]).filter((x): x is string => typeof x === "string")
+    : [];
 
-  // Start expansion one day after dtstart — the template task already
-  // accounts for the first occurrence (the event the user created), so we
-  // don't want to materialize a sibling child for the same day.
-  const expandFrom = new Date(Math.max(now.getTime(), dtstart.getTime() + 86_400_000));
   const occurrences = materializeOccurrences(
     rule.rrule,
-    dtstart,
-    expandFrom,
+    rule.dtstart,
+    from,
     horizonEnd,
     rule.timezone,
     exdates,
+    MAX_OCCURRENCES_PER_SERIES,
   );
 
-  if (occurrences.length === 0) {
-    await db.recurrenceRule.update({
-      where: { id: rule.id },
-      data: { nextMaterializeAt: horizonEnd },
-    });
-    return 0;
+  let events = 0;
+  let tasks = 0;
+
+  if (occurrences.length > 0) {
+    if (rule.templateEvent) {
+      const r = await materializeEvents(db, rule, rule.templateEvent, occurrences);
+      events = r.events;
+      tasks = r.tasks;
+    } else if (rule.task) {
+      tasks = await materializeTaskOnly(db, rule, rule.task, occurrences);
+    }
   }
 
+  // Nightly top-up keeps the rolling horizon full; dedup makes re-runs
+  // idempotent. Finite, fully-materialized rules park past their last
+  // occurrence so the nightly job stops touching them.
+  const lastOccurrence = occurrences[occurrences.length - 1];
+  const finiteAndDone =
+    /COUNT=|UNTIL=/i.test(rule.rrule) && occurrences.length < MAX_OCCURRENCES_PER_SERIES;
+  await db.recurrenceRule.update({
+    where: { id: rule.id },
+    data: {
+      nextMaterializeAt: finiteAndDone
+        ? new Date((lastOccurrence ?? now).getTime() + 86_400_000)
+        : new Date(now.getTime() + 86_400_000),
+    },
+  });
+
+  return { events, tasks };
+}
+
+type RuleWithIncludes = Prisma.RecurrenceRuleGetPayload<{
+  include: { task: { include: { tags: { select: { tagId: true } } } }; templateEvent: true };
+}>;
+
+async function materializeEvents(
+  db: PrismaClient,
+  rule: RuleWithIncludes,
+  template: NonNullable<RuleWithIncludes["templateEvent"]>,
+  occurrences: Date[],
+): Promise<{ events: number; tasks: number }> {
+  const existing = await db.event.findMany({
+    where: { seriesId: rule.id, originalStartsAt: { in: occurrences } },
+    select: { originalStartsAt: true },
+  });
+  const occupied = new Set(
+    existing.map((e) => e.originalStartsAt?.getTime()).filter((t): t is number => t != null),
+  );
+  const durationMs = template.endsAt.getTime() - template.startsAt.getTime();
+
+  let events = 0;
+  let tasks = 0;
+  for (const occ of occurrences) {
+    if (occupied.has(occ.getTime())) continue;
+    try {
+      const event = await db.event.create({
+        data: {
+          userId: template.userId,
+          title: template.title,
+          notes: template.notes,
+          kind: template.kind,
+          source: template.source,
+          confidence: 1,
+          startsAt: occ,
+          endsAt: new Date(occ.getTime() + durationMs),
+          seriesId: rule.id,
+          originalStartsAt: occ,
+        },
+      });
+      events++;
+      if (rule.materializeTasks && rule.task) {
+        const task = await cloneTask(db, rule.task, occ);
+        await db.eventTaskAttribution.create({
+          data: { eventId: event.id, taskId: task.id, weight: 1 },
+        });
+        tasks++;
+      }
+    } catch (err) {
+      // P2002 = another materialization (inline + nightly) won the slot race.
+      if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002") continue;
+      throw err;
+    }
+  }
+  return { events, tasks };
+}
+
+/** Legacy/task-only rules: clone tasks per occurrence, dedup by dueDate instant. */
+async function materializeTaskOnly(
+  db: PrismaClient,
+  rule: RuleWithIncludes,
+  template: NonNullable<RuleWithIncludes["task"]>,
+  occurrences: Date[],
+): Promise<number> {
   const existing = await db.task.findMany({
     where: {
-      templateTaskId: rule.taskId,
+      templateTaskId: template.id,
       dueDate: { gte: occurrences[0], lte: occurrences[occurrences.length - 1] },
     },
     select: { dueDate: true },
   });
   const occupied = new Set(
-    existing
-      .map((t) => t.dueDate?.toISOString().slice(0, 10))
-      .filter((s): s is string => Boolean(s)),
+    existing.map((t) => t.dueDate?.getTime()).filter((t): t is number => t != null),
   );
 
-  const tagIds = template.tags.map((t) => t.tagId);
   let created = 0;
   for (const occ of occurrences) {
-    const dayKey = occ.toISOString().slice(0, 10);
-    if (occupied.has(dayKey)) continue;
-    await db.task.create({
-      data: {
-        userId: template.userId,
-        templateTaskId: rule.taskId,
-        name: template.name,
-        description: template.description,
-        definitionOfDone: template.definitionOfDone,
-        areaId: template.areaId,
-        projectId: template.projectId,
-        stress: template.stress,
-        valence: template.valence,
-        exhaustion: template.exhaustion,
-        estimatedMinutes: template.estimatedMinutes,
-        importance: template.importance,
-        urgency: template.urgency,
-        dueDate: occ,
-        status: TaskStatus.INBOX,
-        ...(tagIds.length
-          ? { tags: { create: tagIds.map((tagId) => ({ tagId })) } }
-          : {}),
-      },
-    });
+    // The template task itself covers the first occurrence for legacy rules.
+    if (occ.getTime() === rule.dtstart.getTime()) continue;
+    if (occupied.has(occ.getTime())) continue;
+    await cloneTask(db, template, occ);
     created++;
   }
-
-  await db.recurrenceRule.update({
-    where: { id: rule.id },
-    data: { nextMaterializeAt: new Date(occurrences[occurrences.length - 1].getTime() + 1) },
-  });
-
   return created;
+}
+
+async function cloneTask(
+  db: PrismaClient,
+  template: NonNullable<RuleWithIncludes["task"]>,
+  dueDate: Date,
+) {
+  const tagIds = template.tags.map((t) => t.tagId);
+  return db.task.create({
+    data: {
+      userId: template.userId,
+      templateTaskId: template.id,
+      name: template.name,
+      description: template.description,
+      definitionOfDone: template.definitionOfDone,
+      areaId: template.areaId,
+      projectId: template.projectId,
+      stress: template.stress,
+      valence: template.valence,
+      exhaustion: template.exhaustion,
+      estimatedMinutes: template.estimatedMinutes,
+      importance: template.importance,
+      urgency: template.urgency,
+      dueDate,
+      status: TaskStatus.INBOX,
+      ...(tagIds.length ? { tags: { create: tagIds.map((tagId) => ({ tagId })) } } : {}),
+    },
+  });
 }

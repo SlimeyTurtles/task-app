@@ -87,6 +87,7 @@ export const eventsRouter = router({
     const event = await ctx.db.event.findFirst({
       where: { id: input.id, userId: ctx.session.user.id },
       include: {
+        series: { select: { id: true, rrule: true, timezone: true, dtstart: true, materializeTasks: true } },
         attributions: {
           include: {
             task: {

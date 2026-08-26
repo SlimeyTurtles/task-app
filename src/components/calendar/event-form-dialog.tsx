@@ -22,7 +22,16 @@ import { TagPicker } from "@/components/tasks/tag-picker";
 import { cn } from "@/lib/utils";
 import { trpc } from "@/lib/trpc/client";
 import { dateToInputValue, inputValueToDate } from "@/lib/format";
-import { REPEAT_OPTIONS, repeatToRrule, rruleToRepeat, type Repeat } from "@/lib/recurrence";
+import {
+  REPEAT_OPTIONS,
+  repeatToRrule,
+  rruleToRepeat,
+  parseRrule,
+  type Repeat,
+  type RecurrencePattern,
+} from "@/lib/recurrence";
+import { RecurrenceEditor } from "@/components/recurring/recurrence-editor";
+import { EditScopeDialog, type EditScope } from "@/components/calendar/edit-scope-dialog";
 
 type Mode = "event" | "block";
 type WhenMode = "manual" | "auto";
@@ -235,10 +244,12 @@ export function EventFormDialog({ state, onClose }: { state: EventDialogState; o
   const [blockLabel, setBlockLabel] = useState("");
   const [schedulable, setSchedulable] = useState(false);
 
-  // shared by both branches — "Repeats" applies to events (writes a
-  // RecurrenceRule on the linked task) and to background blocks (rrule on
-  // the block itself).
+  // Background blocks keep the simple preset select (rrule on the block itself).
   const [repeat, setRepeat] = useState<Repeat>("none");
+  // Events use the structured pattern (RecurrenceRule on the event/task).
+  const [pattern, setPattern] = useState<RecurrencePattern | null>(null);
+  // When saving/deleting an occurrence of a series, ask for the scope first.
+  const [scopeAsk, setScopeAsk] = useState<"edit" | "delete" | null>(null);
 
   // AI overlay states.
   type AiState =
@@ -276,10 +287,12 @@ export function EventFormDialog({ state, onClose }: { state: EventDialogState; o
       setUrgVal(titleTask?.urgency != null ? String(titleTask.urgency) : "");
       setDueDate(titleTask?.dueDate ? dateToInputValue(titleTask.dueDate) : "");
       setTagIds((titleTask?.tags ?? []).map((t) => t.tagId));
-      // Seed Repeats from the linked task's recurrence rule. Paused rules
-      // (nextMaterializeAt = null) still surface their cadence so the user
-      // can see what's set; resume is a one-click change.
-      setRepeat(rruleToRepeat(titleTask?.recurrenceRule?.rrule ?? null));
+      // Seed Repeats from the event's own series first (v2), falling back to
+      // the linked task's legacy rule. Paused rules still surface their
+      // cadence so the user can see what's set.
+      const seriesRrule = existing.series?.rrule ?? titleTask?.recurrenceRule?.rrule ?? null;
+      setPattern(parseRrule(seriesRrule, existing.series?.timezone ?? "UTC"));
+      setRepeat(rruleToRepeat(seriesRrule));
     } else if (state.init) {
       setMode(state.init.kind === EventKind.BACKGROUND ? "block" : "event");
       // If the user picked the time deliberately (drag-to-create on the
@@ -305,15 +318,19 @@ export function EventFormDialog({ state, onClose }: { state: EventDialogState; o
       setBlockKind(TimeBlockKind.SLEEP);
       setBlockLabel("");
       setRepeat("none");
+      setPattern(null);
       setSchedulable(false);
       setTagIds([]);
     }
+    setScopeAsk(null);
     setAiState({ phase: "idle" });
   }, [state.open, state.eventId, existing, state.init]);
 
   const createEvent = trpc.events.create.useMutation();
   const updateEvent = trpc.events.update.useMutation();
+  const updateOccurrence = trpc.events.updateOccurrence.useMutation();
   const delEvent = trpc.events.delete.useMutation();
+  const delOccurrence = trpc.events.deleteOccurrence.useMutation();
   const createBlock = trpc.timeBlocks.create.useMutation();
   const quickCapture = trpc.tasks.quickCapture.useMutation();
   const quickAdd = trpc.events.quickAdd.useMutation();
@@ -392,8 +409,9 @@ export function EventFormDialog({ state, onClose }: { state: EventDialogState; o
         return;
       }
 
-      // ── Editing an existing event: events.update, then write tags through to
-      //    the title task so the event color picks them up.
+      // ── Editing an existing event. Occurrences of a series first ask for
+      //    the edit scope (only this / following / all); everything else is a
+      //    plain events.update.
       if (editing && state.eventId) {
         if (!startAt || !endAt) {
           toast.error("Pick a valid start and end.");
@@ -403,49 +421,16 @@ export function EventFormDialog({ state, onClose }: { state: EventDialogState; o
           toast.error("End must be after start.");
           return;
         }
-        await updateEvent.mutateAsync({
-          id: state.eventId,
-          title: eventTitle.trim() || null,
-          startsAt: startAt,
-          endsAt: endAt,
-          notes: notes.trim() || null,
-          kind: EventKind.EVENT,
-          lazy,
-          attributions: taskIds.map((id) => ({ taskId: id, weight: 1, ratioUnknown: false })),
-        });
-        // Persist tags to the first attached task (the one that drives color).
-        const titleTaskId = taskIds[0] ?? existing?.attributions[0]?.taskId;
-        const existingTagIds = (existing?.attributions[0]?.task?.tags ?? []).map((t) => t.tagId);
-        const changed =
-          tagIds.length !== existingTagIds.length ||
-          tagIds.some((id) => !existingTagIds.includes(id));
-        if (titleTaskId && changed) {
-          await updateTask.mutateAsync({ id: titleTaskId, tagIds });
-          await utils.tasks.list.invalidate();
+        const rowChanged =
+          (eventTitle.trim() || null) !== (existing?.title ?? null) ||
+          (notes.trim() || null) !== (existing?.notes ?? null) ||
+          startAt.getTime() !== new Date(existing!.startsAt).getTime() ||
+          endAt.getTime() !== new Date(existing!.endsAt).getTime();
+        if (existing?.seriesId && !existing.detached && rowChanged) {
+          setScopeAsk("edit");
+          return; // continues in applyEdit() once a scope is picked
         }
-        // Sync recurrence on the linked task. Changing 'none' → cadence
-        // creates a rule; cadence → 'none' removes it (keeping already-
-        // materialized children intact via scope: 'rule_only').
-        if (titleTaskId) {
-          const prevRrule = existing?.attributions[0]?.task?.recurrenceRule?.rrule ?? null;
-          const prevRepeat = rruleToRepeat(prevRrule);
-          if (repeat !== prevRepeat) {
-            const nextRrule = repeatToRrule(repeat);
-            if (nextRrule) {
-              await upsertRecurrence.mutateAsync({
-                taskId: titleTaskId,
-                rrule: nextRrule,
-                timezone: "UTC",
-              });
-            } else {
-              await deleteRecurrence.mutateAsync({ taskId: titleTaskId, scope: "rule_only" });
-            }
-            await utils.recurrence.list.invalidate();
-          }
-        }
-        toast.success("Event updated.");
-        await utils.events.list.invalidate();
-        onClose();
+        await applyEdit(null);
         return;
       }
 
@@ -491,7 +476,8 @@ export function EventFormDialog({ state, onClose }: { state: EventDialogState; o
         startsAt: whenMode === "manual" ? (startAt ?? null) : null,
         endsAt: whenMode === "manual" ? (endAt ?? null) : null,
         lazy,
-        repeat,
+        recurrence: pattern,
+        timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
       });
 
       await Promise.all([utils.events.list.invalidate(), utils.tasks.list.invalidate()]);
@@ -517,16 +503,107 @@ export function EventFormDialog({ state, onClose }: { state: EventDialogState; o
     }
   }
 
-  async function onDelete() {
-    if (!state.eventId) return;
-    if (!confirm("Delete this event?")) return;
+  /** Finish the edit-branch save, optionally with a series scope. */
+  async function applyEdit(scope: EditScope | null) {
+    if (!state.eventId || !startAt || !endAt) return;
     try {
-      await delEvent.mutateAsync({ id: state.eventId });
+      const patch = {
+        title: eventTitle.trim() || null,
+        startsAt: startAt,
+        endsAt: endAt,
+        notes: notes.trim() || null,
+      };
+      if (scope) {
+        await updateOccurrence.mutateAsync({ id: state.eventId, scope, ...patch });
+        // Attributions are inherently per-row; sync them separately.
+        const prevTaskIds = existing?.attributions.map((a) => a.taskId) ?? [];
+        const attrChanged =
+          taskIds.length !== prevTaskIds.length || taskIds.some((id) => !prevTaskIds.includes(id));
+        if (attrChanged) {
+          await updateEvent.mutateAsync({
+            id: state.eventId,
+            attributions: taskIds.map((id) => ({ taskId: id, weight: 1, ratioUnknown: false })),
+          });
+        }
+      } else {
+        await updateEvent.mutateAsync({
+          id: state.eventId,
+          ...patch,
+          lazy,
+          attributions: taskIds.map((id) => ({ taskId: id, weight: 1, ratioUnknown: false })),
+        });
+      }
+
+      // Persist tags to the first attached task (the one that drives color).
+      const titleTaskId = taskIds[0] ?? existing?.attributions[0]?.taskId;
+      const existingTagIds = (existing?.attributions[0]?.task?.tags ?? []).map((t) => t.tagId);
+      const tagsChanged =
+        tagIds.length !== existingTagIds.length || tagIds.some((id) => !existingTagIds.includes(id));
+      if (titleTaskId && tagsChanged) {
+        await updateTask.mutateAsync({ id: titleTaskId, tagIds });
+        await utils.tasks.list.invalidate();
+      }
+
+      // Sync the repeat pattern. Pattern edits are inherently series-wide.
+      const prevRrule =
+        existing?.series?.rrule ?? existing?.attributions[0]?.task?.recurrenceRule?.rrule ?? null;
+      const prevPattern = parseRrule(prevRrule, existing?.series?.timezone ?? "UTC");
+      const patternChanged = JSON.stringify(pattern) !== JSON.stringify(prevPattern);
+      if (patternChanged) {
+        if (pattern) {
+          await upsertRecurrence.mutateAsync(
+            existing?.series
+              ? { ruleId: existing.series.id, pattern }
+              : {
+                  templateEventId: state.eventId,
+                  pattern,
+                  timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+                },
+          );
+        } else if (existing?.series) {
+          await deleteRecurrence.mutateAsync({ ruleId: existing.series.id, scope: "future" });
+        } else if (titleTaskId && prevRrule) {
+          await deleteRecurrence.mutateAsync({ taskId: titleTaskId, scope: "rule_only" });
+        }
+        await utils.recurrence.list.invalidate();
+      }
+
+      toast.success("Event updated.");
+      await utils.events.list.invalidate();
+      onClose();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to save.");
+    } finally {
+      setScopeAsk(null);
+    }
+  }
+
+  async function applyDelete(scope: EditScope | null) {
+    if (!state.eventId) return;
+    try {
+      if (scope) {
+        await delOccurrence.mutateAsync({ id: state.eventId, scope });
+        await utils.recurrence.list.invalidate();
+      } else {
+        await delEvent.mutateAsync({ id: state.eventId });
+      }
       await utils.events.list.invalidate();
       onClose();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Failed to delete.");
+    } finally {
+      setScopeAsk(null);
     }
+  }
+
+  async function onDelete() {
+    if (!state.eventId) return;
+    if (existing?.seriesId) {
+      setScopeAsk("delete");
+      return;
+    }
+    if (!confirm("Delete this event?")) return;
+    await applyDelete(null);
   }
 
   const title = editing
@@ -645,18 +722,14 @@ export function EventFormDialog({ state, onClose }: { state: EventDialogState; o
                   </p>
                 )}
 
-                <div className="grid grid-cols-[1fr_auto] items-center gap-2 text-xs">
+                <div className="grid gap-1 text-xs">
                   <Label htmlFor="ev-repeat" className="text-[10px] text-muted-foreground uppercase tracking-wider font-medium">Repeats</Label>
-                  <select
-                    id="ev-repeat"
-                    value={repeat}
-                    onChange={(e) => setRepeat(e.target.value as Repeat)}
-                    className={cn(discreteInputClass, "w-32 bg-transparent")}
-                  >
-                    {REPEAT_OPTIONS.map((o) => (
-                      <option key={o.value} value={o.value}>{o.label}</option>
-                    ))}
-                  </select>
+                  <RecurrenceEditor
+                    value={pattern}
+                    onChange={setPattern}
+                    anchor={startAt ?? new Date()}
+                    selectId="ev-repeat"
+                  />
                 </div>
 
                 {/* Jira-style metadata rows. Blank = AI infers. */}
@@ -887,6 +960,18 @@ export function EventFormDialog({ state, onClose }: { state: EventDialogState; o
           </div>
         </DialogFooter>
       </DialogContent>
+
+      <EditScopeDialog
+        open={scopeAsk != null}
+        mode={scopeAsk ?? "edit"}
+        isFirst={
+          existing?.originalStartsAt != null &&
+          existing.series != null &&
+          new Date(existing.originalStartsAt).getTime() <= new Date(existing.series.dtstart).getTime()
+        }
+        onPick={(scope) => (scopeAsk === "delete" ? applyDelete(scope) : applyEdit(scope))}
+        onCancel={() => setScopeAsk(null)}
+      />
     </Dialog>
   );
 }

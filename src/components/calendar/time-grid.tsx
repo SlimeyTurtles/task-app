@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
+import { BellRing, Repeat } from "lucide-react";
 import { EventKind, TaskStatus } from "@prisma/client";
 
 import { cn } from "@/lib/utils";
@@ -47,6 +48,9 @@ export type GridEvent = {
   kind: EventKind;
   confidence: number;
   notes: string | null;
+  seriesId: string | null;
+  originalStartsAt: Date | null;
+  detached: boolean;
   attributions: { task: EventTask }[];
 };
 
@@ -423,6 +427,33 @@ function DayColumn({
         const isDragging = draggedEventId === ev.id;
         const multiDay = ev.endsAt.getTime() > dayEnd || ev.startsAt.getTime() < dayStart;
         const done = isEventComplete(ev);
+        const isSeries = ev.seriesId != null;
+
+        // Reminders render as a compact pill at their time, not a duration block.
+        if (ev.kind === EventKind.REMINDER) {
+          return (
+            <EventContextMenu key={ev.id} event={ev} onEdit={onEditEvent}>
+              <div
+                data-testid="reminder-pill"
+                onPointerDown={(e) => onPointerDownEvent(e, ev, dayIndex)}
+                className={cn(
+                  "absolute z-5 flex items-center gap-1 rounded-full border border-primary/60 bg-card px-1.5 shadow-sm",
+                  "text-[0.65rem] font-medium cursor-grab active:cursor-grabbing h-4.5 -translate-y-1/2",
+                  isDragging && "opacity-40",
+                )}
+                style={{ top: `${pos.topPct}%`, left: "2px", right: "2px" }}
+              >
+                <BellRing className="size-3 text-primary shrink-0" aria-hidden />
+                <span className="truncate">{label}</span>
+                {isSeries ? <Repeat className="size-2.5 text-muted-foreground shrink-0" aria-hidden /> : null}
+                <span className="ml-auto text-[0.6rem] text-muted-foreground tabular-nums shrink-0">
+                  {formatTime(ev.startsAt)}
+                </span>
+              </div>
+            </EventContextMenu>
+          );
+        }
+
         return (
           <EventContextMenu key={ev.id} event={ev} onEdit={onEditEvent}>
             <div
@@ -448,6 +479,7 @@ function DayColumn({
                   done && "line-through decoration-foreground/60",
                 )}
               >
+                {isSeries ? <Repeat className="inline size-2.5 mr-0.5 -mt-px text-foreground/60" aria-hidden /> : null}
                 {label}
               </div>
               <div className="px-1.5 text-[0.62rem] text-muted-foreground tabular-nums truncate">

@@ -9,6 +9,7 @@ import { toast } from "sonner";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import { trpc } from "@/lib/trpc/client";
+import { EditScopeDialog } from "@/components/calendar/edit-scope-dialog";
 import type { GridEvent } from "@/components/calendar/time-grid";
 
 /**
@@ -28,11 +29,13 @@ export function EventContextMenu({
 }) {
   const [open, setOpen] = useState(false);
   const [filter, setFilter] = useState("");
+  const [askDeleteScope, setAskDeleteScope] = useState(false);
 
   const utils = trpc.useUtils();
   const { data: tasks } = trpc.tasks.list.useQuery({}, { enabled: open });
   const updateEvent = trpc.events.update.useMutation();
   const delEvent = trpc.events.delete.useMutation();
+  const delOccurrence = trpc.events.deleteOccurrence.useMutation();
   const markComplete = trpc.tasks.markComplete.useMutation();
   const updateTask = trpc.tasks.update.useMutation();
 
@@ -84,6 +87,11 @@ export function EventContextMenu({
   }
 
   async function onDelete() {
+    if (event.seriesId) {
+      setOpen(false);
+      setAskDeleteScope(true);
+      return;
+    }
     if (!confirm("Delete this event?")) return;
     try {
       await delEvent.mutateAsync({ id: event.id });
@@ -243,6 +251,23 @@ export function EventContextMenu({
           </CtxPrimitive.Popup>
         </CtxPrimitive.Positioner>
       </CtxPrimitive.Portal>
+
+      <EditScopeDialog
+        open={askDeleteScope}
+        mode="delete"
+        isFirst={false}
+        onPick={async (scope) => {
+          try {
+            await delOccurrence.mutateAsync({ id: event.id, scope });
+            await Promise.all([utils.events.list.invalidate(), utils.recurrence.list.invalidate()]);
+          } catch (err) {
+            toast.error(err instanceof Error ? err.message : "Failed to delete.");
+          } finally {
+            setAskDeleteScope(false);
+          }
+        }}
+        onCancel={() => setAskDeleteScope(false)}
+      />
     </CtxPrimitive.Root>
   );
 }

@@ -11,6 +11,7 @@ import { TimeGrid, type GridEvent } from "@/components/calendar/time-grid";
 import { MonthGrid } from "@/components/calendar/month-grid";
 import { EventFormDialog, type EventDialogState } from "@/components/calendar/event-form-dialog";
 import { EventCreateWizard, type WizardInit } from "@/components/calendar/event-create-wizard";
+import { EditScopeDialog } from "@/components/calendar/edit-scope-dialog";
 import { PlanAheadDialog } from "@/components/calendar/plan-ahead-dialog";
 import { ViewControl, windowFor, type CalendarView } from "@/components/calendar/view-control";
 
@@ -129,6 +130,34 @@ export function CalendarClient() {
       void utils.events.list.invalidate();
     },
   });
+  const updateOccurrence = trpc.events.updateOccurrence.useMutation({
+    onSuccess: () => Promise.all([utils.events.list.invalidate(), utils.recurrence.list.invalidate()]),
+    onError: (e) => {
+      toast.error(e.message);
+      void utils.events.list.invalidate();
+    },
+  });
+
+  // Dragging an occurrence of a series asks for the edit scope before saving.
+  const [pendingDrag, setPendingDrag] = useState<{
+    eventId: string;
+    startsAt: Date;
+    endsAt: Date;
+    isFirst: boolean;
+  } | null>(null);
+
+  function commitDrag(eventId: string, startsAt: Date, endsAt: Date) {
+    const ev = events?.find((e) => e.id === eventId);
+    if (ev?.seriesId && !ev.detached) {
+      const isFirst =
+        ev.originalStartsAt != null &&
+        ev.series != null &&
+        new Date(ev.originalStartsAt).getTime() <= new Date(ev.series.dtstart).getTime();
+      setPendingDrag({ eventId, startsAt, endsAt, isFirst });
+      return;
+    }
+    update.mutate({ id: eventId, startsAt, endsAt });
+  }
 
   const gridEvents = (events ?? []) as unknown as GridEvent[];
   const title = rangeLabel(rangeStart, win.end);
@@ -178,8 +207,8 @@ export function CalendarClient() {
               setWizard({ open: true, init: { startsAt: start, endsAt: end, pickedTime: true } })
             }
             onEditEvent={(eventId) => setDialog({ open: true, eventId })}
-            onMoveEvent={(eventId, start, end) => update.mutate({ id: eventId, startsAt: start, endsAt: end })}
-            onResizeEvent={(eventId, start, end) => update.mutate({ id: eventId, startsAt: start, endsAt: end })}
+            onMoveEvent={commitDrag}
+            onResizeEvent={commitDrag}
           />
         ) : (
           <MonthGrid
@@ -197,6 +226,26 @@ export function CalendarClient() {
         )}
       </div>
 
+      <EditScopeDialog
+        open={pendingDrag != null}
+        mode="edit"
+        isFirst={pendingDrag?.isFirst ?? false}
+        onPick={(scope) => {
+          if (pendingDrag) {
+            updateOccurrence.mutate({
+              id: pendingDrag.eventId,
+              scope,
+              startsAt: pendingDrag.startsAt,
+              endsAt: pendingDrag.endsAt,
+            });
+          }
+          setPendingDrag(null);
+        }}
+        onCancel={() => {
+          setPendingDrag(null);
+          void utils.events.list.invalidate(); // snap the block back
+        }}
+      />
       <EventFormDialog state={dialog} onClose={() => setDialog({ open: false })} />
       <EventCreateWizard
         open={wizard.open}

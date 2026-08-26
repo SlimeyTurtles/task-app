@@ -1,6 +1,7 @@
 "use client";
 
 import { EventKind } from "@prisma/client";
+import { BellRing, Repeat } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 import { addDays, isSameDay, startOfLocalDay, startOfWeek, formatTime } from "@/lib/scheduling";
@@ -121,9 +122,14 @@ function MonthCell({
             className="flex items-center gap-1 rounded px-1 py-0.5 text-[0.68rem] leading-tight truncate hover:brightness-95"
             style={{ backgroundColor: `color-mix(in oklch, ${color} 22%, var(--card))` }}
           >
-            <span className="size-1.5 rounded-full shrink-0" style={{ backgroundColor: color }} />
+            {ev.kind === EventKind.REMINDER ? (
+              <BellRing className="size-2.5 text-primary shrink-0" aria-hidden />
+            ) : (
+              <span className="size-1.5 rounded-full shrink-0" style={{ backgroundColor: color }} />
+            )}
             <span className="tabular-nums text-muted-foreground">{formatTime(ev.startsAt).replace(":00", "")}</span>
             <span className="truncate">{label}</span>
+            {ev.seriesId ? <Repeat className="size-2.5 text-muted-foreground shrink-0 ml-auto" aria-hidden /> : null}
           </span>
         );
       })}

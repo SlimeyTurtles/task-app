@@ -29,12 +29,15 @@ export function RecurrenceEditor({
   onChange,
   anchor,
   selectId = "recurrence-preset",
+  dense = false,
 }: {
   value: RecurrencePattern | null;
   onChange: (p: RecurrencePattern | null) => void;
   /** The first occurrence — drives weekday/day-of-month labels. */
   anchor: Date;
   selectId?: string;
+  /** Tighter control for sidebar/metadata contexts. */
+  dense?: boolean;
 }) {
   const anchorDay = WEEKDAY_CODES[(anchor.getDay() + 6) % 7];
   const nth = Math.min(Math.ceil(anchor.getDate() / 7), 5) - 1;
@@ -62,11 +65,18 @@ export function RecurrenceEditor({
     }
   }
 
-  const summary = value ? describeRrule(buildRrule(value, anchor)) : null;
+  // Presets are self-describing; the plain-English summary only earns its
+  // row when the pattern is custom.
+  const summary = value && preset === "custom" ? describeRrule(buildRrule(value, anchor)) : null;
 
   return (
-    <div className="grid gap-2">
-      <select id={selectId} value={preset} onChange={(e) => pickPreset(e.target.value as Preset)} className={selectClass}>
+    <div className={dense ? "grid gap-1.5" : "grid gap-2"}>
+      <select
+        id={selectId}
+        value={preset}
+        onChange={(e) => pickPreset(e.target.value as Preset)}
+        className={dense ? `${selectClass} h-7 text-xs px-1` : selectClass}
+      >
         <option value="none">Does not repeat</option>
         <option value="daily">Every day</option>
         <option value="weekdays">Weekdays (Mon–Fri)</option>
@@ -82,7 +92,7 @@ export function RecurrenceEditor({
       </select>
 
       {preset === "custom" && value ? (
-        <div className="grid gap-2.5 rounded-md border border-dashed border-primary/30 bg-primary/[0.03] p-3">
+        <div className="grid gap-2.5 rounded-md border border-dashed border-primary/30 bg-primary/3 p-3">
           <div className="flex items-center gap-2 text-sm">
             <span className="text-muted-foreground">Every</span>
             <Input
@@ -241,7 +251,7 @@ export function RecurrenceEditor({
         </div>
       ) : null}
 
-      {summary && preset !== "none" ? (
+      {summary ? (
         <p className="font-heading text-xs italic text-muted-foreground">{summary}</p>
       ) : null}
     </div>

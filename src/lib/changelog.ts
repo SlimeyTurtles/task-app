@@ -17,6 +17,15 @@ export const PLANNED_FEATURES: string[] = [
 // Newest first. Keep the top entry's version in sync with package.json.
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: "0.9.1",
+    date: "2026-08-26",
+    title: "Fits on your screen again",
+    changes: [
+      { kind: "fixed", text: "The event dialogs no longer overflow short screens — they cap at the viewport and scroll internally only when truly needed." },
+      { kind: "improved", text: "The Repeats control is a single compact row when editing; the plain-English summary only appears for custom patterns." },
+    ],
+  },
+  {
     version: "0.9.0",
     date: "2026-08-26",
     title: "Recurrence, properly",

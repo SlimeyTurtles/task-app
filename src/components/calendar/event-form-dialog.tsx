@@ -616,12 +616,13 @@ export function EventFormDialog({ state, onClose }: { state: EventDialogState; o
 
   return (
     <Dialog open={state.open} onOpenChange={(o) => (o ? null : onClose())}>
-      <DialogContent className="sm:max-w-3xl gap-0 p-0 relative overflow-hidden">
+      <DialogContent className="sm:max-w-3xl gap-0 p-0 relative overflow-hidden max-h-[calc(100svh-2rem)] grid-rows-[auto_minmax(0,1fr)_auto]">
         <DialogHeader className="px-5 pt-4 pb-2.5 border-b">
           <DialogTitle>{title}</DialogTitle>
         </DialogHeader>
 
-        <div className="px-5 py-3 grid gap-3">
+        {/* Scrolls internally only when the viewport is shorter than the content. */}
+        <div className="px-5 py-3 grid gap-3 min-h-0 overflow-y-auto">
           {mode === "event" ? (
             <div className="grid md:grid-cols-[1.35fr_1fr] gap-5 items-stretch">
               {/* MAIN COLUMN: title + big description (fills sidebar height) */}
@@ -722,9 +723,10 @@ export function EventFormDialog({ state, onClose }: { state: EventDialogState; o
                   </p>
                 )}
 
-                <div className="grid gap-1 text-xs">
-                  <Label htmlFor="ev-repeat" className="text-[10px] text-muted-foreground uppercase tracking-wider font-medium">Repeats</Label>
+                <div className="grid grid-cols-[auto_1fr] items-start gap-2 text-xs">
+                  <Label htmlFor="ev-repeat" className="text-[10px] text-muted-foreground uppercase tracking-wider font-medium pt-1.5">Repeats</Label>
                   <RecurrenceEditor
+                    dense
                     value={pattern}
                     onChange={setPattern}
                     anchor={startAt ?? new Date()}

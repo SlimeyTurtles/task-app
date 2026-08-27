@@ -342,13 +342,13 @@ export function EventCreateWizard({
 
   return (
     <Dialog open={open} onOpenChange={(o) => (o ? null : onClose())}>
-      <DialogContent className="sm:max-w-2xl gap-0 p-0 overflow-hidden">
+      <DialogContent className="sm:max-w-2xl gap-0 p-0 overflow-hidden max-h-[calc(100svh-2rem)] grid-rows-[auto_minmax(0,1fr)_auto]">
         <DialogHeader className="px-5 pt-4 pb-3 border-b">
           <DialogTitle>New event</DialogTitle>
           <ProgressBar step={step} onJump={(s) => setStep(s)} canClarify={yellowRed.length > 0} />
         </DialogHeader>
 
-        <div className="px-5 py-4 min-h-[360px]">
+        <div className="px-5 py-4 sm:min-h-90 min-h-0 overflow-y-auto">
           {step === "capture" && (
             <CaptureStep
               description={description}

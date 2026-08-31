@@ -5,7 +5,7 @@ import { BellRing, Repeat } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 import { addDays, isSameDay, startOfLocalDay, startOfWeek, formatTime } from "@/lib/scheduling";
-import { eventLabel, type GridEvent } from "./time-grid";
+import { eventColor, eventLabel, type GridEvent } from "./time-grid";
 
 /**
  * Calendar "box" view for ranges wider than a week. Renders full weeks
@@ -109,8 +109,7 @@ function MonthCell({
         </span>
       </div>
       {dayEvents.slice(0, MAX).map((ev) => {
-        const task = ev.attributions[0]?.task;
-        const color = task?.area?.color ?? "var(--primary)";
+        const color = eventColor(ev);
         const label = eventLabel(ev);
         return (
           <span

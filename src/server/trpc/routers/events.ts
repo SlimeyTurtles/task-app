@@ -29,6 +29,7 @@ const EventInput = z.object({
   /** When true (or wide-window heuristic kicks in), confidence drops to 0.3 — see design doc §4.1 "lazy log". */
   lazy: z.boolean().default(false),
   attributions: z.array(AttributionInput).default([]),
+  tagIds: z.array(z.string()).default([]),
 });
 
 // Update uses explicit optionals with NO defaults: an omitted field must stay
@@ -45,6 +46,8 @@ const EventUpdateInput = z.object({
   source: z.nativeEnum(EventSource).optional(),
   lazy: z.boolean().optional(),
   attributions: z.array(AttributionInput).optional(),
+  // Tags are series-wide: setting them on any occurrence retags the whole series.
+  tagIds: z.array(z.string()).optional(),
 });
 
 const Range = z.object({
@@ -62,6 +65,7 @@ export const eventsRouter = router({
       orderBy: { startsAt: "asc" },
       include: {
         series: { select: { id: true, rrule: true, timezone: true, dtstart: true } },
+        tags: { include: { tag: { select: { id: true, name: true, color: true } } } },
         attributions: {
           include: {
             task: {
@@ -88,6 +92,7 @@ export const eventsRouter = router({
       where: { id: input.id, userId: ctx.session.user.id },
       include: {
         series: { select: { id: true, rrule: true, timezone: true, dtstart: true, materializeTasks: true } },
+        tags: { include: { tag: { select: { id: true, name: true, color: true } } } },
         attributions: {
           include: {
             task: {
@@ -121,6 +126,7 @@ export const eventsRouter = router({
       throw new TRPCError({ code: "BAD_REQUEST", message: "End must be after start." });
     }
     await assertTasksOwned(ctx, input.attributions.map((a) => a.taskId));
+    await assertTagsOwned(ctx, input.tagIds);
 
     const confidence = computeConfidence(input.lazy, input.startsAt, input.endsAt);
     const ratioUnknownDefault = input.attributions.length > 1;
@@ -144,6 +150,9 @@ export const eventsRouter = router({
               })),
             }
           : undefined,
+        tags: input.tagIds.length
+          ? { create: input.tagIds.map((tagId) => ({ tagId })) }
+          : undefined,
       },
     });
   }),
@@ -151,15 +160,18 @@ export const eventsRouter = router({
   update: protectedProcedure
     .input(EventUpdateInput)
     .mutation(async ({ ctx, input }) => {
-      const { id, attributions, lazy, ...rest } = input;
+      const { id, attributions, tagIds, lazy, ...rest } = input;
       const owned = await ctx.db.event.findFirst({
         where: { id, userId: ctx.session.user.id },
-        select: { id: true, startsAt: true, endsAt: true, confidence: true },
+        select: { id: true, startsAt: true, endsAt: true, confidence: true, seriesId: true },
       });
       if (!owned) throw new TRPCError({ code: "NOT_FOUND" });
 
       if (attributions) {
         await assertTasksOwned(ctx, attributions.map((a) => a.taskId));
+      }
+      if (tagIds) {
+        await assertTagsOwned(ctx, tagIds);
       }
 
       const startsAt = rest.startsAt ?? owned.startsAt;
@@ -190,6 +202,25 @@ export const eventsRouter = router({
                 weight: a.weight,
                 ratioUnknown: a.ratioUnknown || ratioUnknownDefault,
               })),
+              skipDuplicates: true,
+            });
+          }
+        }
+        // Tags color the whole series — a recurring "meeting" tagged once
+        // should look the same on every occurrence.
+        if (tagIds !== undefined) {
+          const targetIds = owned.seriesId
+            ? (
+                await tx.event.findMany({
+                  where: { seriesId: owned.seriesId, userId: ctx.session.user.id },
+                  select: { id: true },
+                })
+              ).map((e) => e.id)
+            : [id];
+          await tx.eventTag.deleteMany({ where: { eventId: { in: targetIds } } });
+          if (tagIds.length) {
+            await tx.eventTag.createMany({
+              data: targetIds.flatMap((eventId) => tagIds.map((tagId) => ({ eventId, tagId }))),
               skipDuplicates: true,
             });
           }
@@ -481,6 +512,7 @@ export const eventsRouter = router({
           ...(taskId
             ? { attributions: { create: { taskId, weight: 1, ratioUnknown: false } } }
             : {}),
+          ...(tagIds.length ? { tags: { create: tagIds.map((tagId) => ({ tagId })) } } : {}),
         },
       });
 
@@ -634,5 +666,15 @@ async function assertTasksOwned(ctx: Ctx, taskIds: string[]) {
   });
   if (count !== taskIds.length) {
     throw new TRPCError({ code: "BAD_REQUEST", message: "One or more tasks not found." });
+  }
+}
+
+async function assertTagsOwned(ctx: Ctx, tagIds: string[]) {
+  if (tagIds.length === 0) return;
+  const count = await ctx.db.tag.count({
+    where: { id: { in: tagIds }, userId: ctx.session.user.id },
+  });
+  if (count !== tagIds.length) {
+    throw new TRPCError({ code: "BAD_REQUEST", message: "One or more tags not found." });
   }
 }

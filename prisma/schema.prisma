@@ -465,6 +465,7 @@ model Tag {
 
   tasks    TaskTag[]
   projects ProjectTag[]
+  events   EventTag[]
   shares   TagShare[]
 
   @@index([userId])
@@ -490,6 +491,17 @@ model ProjectTag {
   tag     Tag     @relation(fields: [tagId], references: [id], onDelete: Cascade)
 
   @@id([projectId, tagId])
+  @@index([tagId])
+}
+
+model EventTag {
+  eventId String
+  tagId   String
+
+  event Event @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  tag   Tag   @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@id([eventId, tagId])
   @@index([tagId])
 }
 
@@ -532,6 +544,7 @@ model Event {
 
   user          User                   @relation(fields: [userId], references: [id], onDelete: Cascade)
   attributions  EventTaskAttribution[]
+  tags          EventTag[]
   series        RecurrenceRule?        @relation("SeriesOccurrences", fields: [seriesId], references: [id], onDelete: SetNull)
   seriesAnchor  RecurrenceRule?        @relation("SeriesTemplate")
   notifications Notification[]

@@ -17,6 +17,17 @@ export const PLANNED_FEATURES: string[] = [
 // Newest first. Keep the top entry's version in sync with package.json.
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: "0.10.0",
+    date: "2026-08-31",
+    title: "Tags color your calendar",
+    changes: [
+      { kind: "added", text: "Right-click any event to tag it — no task required. Tags now live on events themselves." },
+      { kind: "added", text: "Create a tag straight from the right-click menu: type a name and pick a color swatch." },
+      { kind: "added", text: "A tag's color now paints the event on the calendar, so a \"meetings\" tag makes every meeting that color." },
+      { kind: "improved", text: "Tagging a recurring event tags the whole series, and new occurrences inherit the tags." },
+    ],
+  },
+  {
     version: "0.9.1",
     date: "2026-08-26",
     title: "Fits on your screen again",

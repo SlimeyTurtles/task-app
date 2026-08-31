@@ -47,6 +47,21 @@ export async function makeInviteCode(): Promise<string> {
   return code;
 }
 
+/** Seed a plain titled event for a user, bypassing the AI event wizard. */
+export async function seedEvent(
+  email: string,
+  title: string,
+  startsAt: Date,
+  endsAt: Date,
+): Promise<string> {
+  const user = await db.user.findUniqueOrThrow({ where: { email }, select: { id: true } });
+  const event = await db.event.create({
+    data: { userId: user.id, title, startsAt, endsAt },
+    select: { id: true },
+  });
+  return event.id;
+}
+
 /** Set a task's due date by name + user email. Used by tests that need
  *  minute-level dueDate precision (the UI's date input is day-only). */
 export async function setTaskDueDate(email: string, taskName: string, dueAt: Date): Promise<void> {

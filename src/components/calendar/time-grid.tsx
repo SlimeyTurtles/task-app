@@ -34,11 +34,14 @@ export function isEventComplete(ev: { attributions: { task: { status?: TaskStatu
   return ev.attributions.every((a) => a.task.status === TaskStatus.DONE);
 }
 
-/** Color priority: first tag with a color → area color → primary. */
-function eventColor(task: EventTask | undefined): string {
+/** Color priority: event's own tag → task tag → area color → primary. */
+export function eventColor(ev: GridEvent): string {
+  const ownTagColor = ev.tags?.find((t) => t.tag.color)?.tag.color;
+  if (ownTagColor) return ownTagColor;
+  const task = ev.attributions[0]?.task;
   if (!task) return "var(--primary)";
-  const tagColor = task.tags?.find((t) => t.tag.color)?.tag.color;
-  return tagColor ?? task.area?.color ?? "var(--primary)";
+  const taskTagColor = task.tags?.find((t) => t.tag.color)?.tag.color;
+  return taskTagColor ?? task.area?.color ?? "var(--primary)";
 }
 export type GridEvent = {
   id: string;
@@ -52,6 +55,7 @@ export type GridEvent = {
   originalStartsAt: Date | null;
   detached: boolean;
   attributions: { task: EventTask }[];
+  tags?: { tag: EventTag }[];
 };
 
 /** Display label: the event's own title, else the attributed task(s), else "Untitled". */
@@ -420,9 +424,8 @@ function DayColumn({
         const pos = clampToDay(ev.startsAt.getTime(), ev.endsAt.getTime(), day);
         if (!pos) return null;
         const lazy = ev.confidence < 1;
-        const titleTask = ev.attributions[0]?.task;
         const label = eventLabel(ev);
-        const color = eventColor(titleTask);
+        const color = eventColor(ev);
         const widthPct = 100 / lanes;
         const isDragging = draggedEventId === ev.id;
         const multiDay = ev.endsAt.getTime() > dayEnd || ev.startsAt.getTime() < dayStart;

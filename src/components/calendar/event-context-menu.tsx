@@ -2,7 +2,7 @@
 
 import { useMemo, useState, type ReactNode } from "react";
 import { ContextMenu as CtxPrimitive } from "@base-ui/react/context-menu";
-import { Check, CheckCircle2, Circle, PencilLine, Plus, Search, Trash2, X } from "lucide-react";
+import { Check, CheckCircle2, Circle, PencilLine, Plus, Search, Tag, Trash2, X } from "lucide-react";
 import { TaskStatus } from "@prisma/client";
 import { toast } from "sonner";
 
@@ -12,10 +12,22 @@ import { trpc } from "@/lib/trpc/client";
 import { EditScopeDialog } from "@/components/calendar/edit-scope-dialog";
 import type { GridEvent } from "@/components/calendar/time-grid";
 
+/** Preset swatches for creating a tag straight from the menu. */
+const TAG_COLORS = [
+  "#ef4444",
+  "#f97316",
+  "#eab308",
+  "#22c55e",
+  "#14b8a6",
+  "#3b82f6",
+  "#8b5cf6",
+  "#ec4899",
+];
+
 /**
- * Right-click menu for an event. Hosts a task picker (the primary reason
- * the user wanted this) plus Edit / Delete. Keeps the menu open while
- * picking so the user can swap multiple tasks in one shot — closes on
+ * Right-click menu for an event. Hosts a tag picker (tags drive the event's
+ * color) and a task picker, plus Edit / Delete. Keeps the menu open while
+ * picking so the user can swap multiple tags/tasks in one shot — closes on
  * outside click or pressing Escape.
  */
 export function EventContextMenu({
@@ -29,19 +41,26 @@ export function EventContextMenu({
 }) {
   const [open, setOpen] = useState(false);
   const [filter, setFilter] = useState("");
+  const [tagFilter, setTagFilter] = useState("");
   const [askDeleteScope, setAskDeleteScope] = useState(false);
 
   const utils = trpc.useUtils();
   const { data: tasks } = trpc.tasks.list.useQuery({}, { enabled: open });
+  const { data: allTags } = trpc.tags.list.useQuery(undefined, { enabled: open });
   const updateEvent = trpc.events.update.useMutation();
   const delEvent = trpc.events.delete.useMutation();
   const delOccurrence = trpc.events.deleteOccurrence.useMutation();
   const markComplete = trpc.tasks.markComplete.useMutation();
   const updateTask = trpc.tasks.update.useMutation();
+  const createTag = trpc.tags.create.useMutation();
 
   const attachedIds = useMemo(
     () => event.attributions.map((a) => a.task.id),
     [event.attributions],
+  );
+  const attachedTagIds = useMemo(
+    () => (event.tags ?? []).map((t) => t.tag.id),
+    [event.tags],
   );
 
   const filtered = useMemo(() => {
@@ -51,6 +70,17 @@ export function EventContextMenu({
       ? tasks.filter((t) => t.name.toLowerCase().includes(q))
       : tasks;
   }, [tasks, filter]);
+
+  const filteredTags = useMemo(() => {
+    if (!allTags) return [];
+    const q = tagFilter.trim().toLowerCase();
+    return q ? allTags.filter((t) => t.name.toLowerCase().includes(q)) : allTags;
+  }, [allTags, tagFilter]);
+
+  const tagQuery = tagFilter.trim();
+  const canCreateTag =
+    tagQuery.length > 0 &&
+    !(allTags ?? []).some((t) => t.name.toLowerCase() === tagQuery.toLowerCase());
 
   async function saveAttributions(nextIds: string[]) {
     try {
@@ -69,6 +99,33 @@ export function EventContextMenu({
       ? attachedIds.filter((id) => id !== taskId)
       : [...attachedIds, taskId];
     void saveAttributions(next);
+  }
+
+  async function saveTags(nextIds: string[]) {
+    try {
+      await updateEvent.mutateAsync({ id: event.id, tagIds: nextIds });
+      await utils.events.list.invalidate();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to update tags.");
+    }
+  }
+
+  function toggleTag(tagId: string) {
+    const next = attachedTagIds.includes(tagId)
+      ? attachedTagIds.filter((id) => id !== tagId)
+      : [...attachedTagIds, tagId];
+    void saveTags(next);
+  }
+
+  async function createAndAttachTag(color: string) {
+    try {
+      const tag = await createTag.mutateAsync({ name: tagQuery, color });
+      setTagFilter("");
+      await utils.tags.list.invalidate();
+      await saveTags([...attachedTagIds, tag.id]);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to create tag.");
+    }
   }
 
   async function toggleDone(taskId: string, currentlyDone: boolean) {
@@ -107,7 +164,10 @@ export function EventContextMenu({
       open={open}
       onOpenChange={(o) => {
         setOpen(o);
-        if (!o) setFilter("");
+        if (!o) {
+          setFilter("");
+          setTagFilter("");
+        }
       }}
     >
       <CtxPrimitive.Trigger render={children as React.ReactElement} />
@@ -120,6 +180,104 @@ export function EventContextMenu({
               "data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95",
             )}
           >
+            {/* Tags — they drive the event's color; series share tags */}
+            <div className="px-1 pb-1">
+              <p className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium mb-1">
+                Tags
+              </p>
+              {attachedTagIds.length > 0 ? (
+                <div className="flex flex-wrap gap-1 px-1 pb-1">
+                  {(event.tags ?? []).map(({ tag }) => (
+                    <span
+                      key={tag.id}
+                      className="inline-flex items-center gap-1 rounded-full border px-1.5 py-0.5 text-[0.68rem]"
+                      style={
+                        tag.color
+                          ? { backgroundColor: `color-mix(in oklch, ${tag.color} 18%, var(--card))` }
+                          : undefined
+                      }
+                    >
+                      {tag.color ? (
+                        <span className="size-2 rounded-full shrink-0" style={{ backgroundColor: tag.color }} />
+                      ) : null}
+                      {tag.name}
+                      <button
+                        type="button"
+                        onClick={() => toggleTag(tag.id)}
+                        className="text-muted-foreground hover:text-destructive inline-flex"
+                        title="Remove tag"
+                        aria-label={`Remove tag ${tag.name}`}
+                      >
+                        <X className="size-3" />
+                      </button>
+                    </span>
+                  ))}
+                </div>
+              ) : null}
+              <div className="relative">
+                <Tag className="absolute left-2 top-1/2 -translate-y-1/2 size-3.5 text-muted-foreground pointer-events-none" />
+                <Input
+                  autoFocus
+                  placeholder="Tag, or type to create…"
+                  className="h-7 pl-7 text-xs"
+                  value={tagFilter}
+                  onChange={(e) => setTagFilter(e.target.value)}
+                  // Base-ui Menu would otherwise treat typing as keyboard nav.
+                  onKeyDown={(e) => e.stopPropagation()}
+                />
+              </div>
+              <div className="max-h-32 overflow-y-auto mt-1">
+                {filteredTags.slice(0, 30).map((t) => {
+                  const on = attachedTagIds.includes(t.id);
+                  return (
+                    <button
+                      key={t.id}
+                      type="button"
+                      onClick={() => toggleTag(t.id)}
+                      className={cn(
+                        "w-full text-left px-1.5 py-1 text-xs rounded-md flex items-center gap-2 hover:bg-accent/60",
+                        on && "bg-accent/40",
+                      )}
+                    >
+                      <span
+                        className="size-2.5 rounded-full shrink-0 border"
+                        style={t.color ? { backgroundColor: t.color, borderColor: t.color } : undefined}
+                      />
+                      <span className="truncate flex-1">{t.name}</span>
+                      {on ? <Check className="size-3 text-primary shrink-0" /> : null}
+                    </button>
+                  );
+                })}
+                {filteredTags.length === 0 && !canCreateTag ? (
+                  <p className="text-xs text-muted-foreground italic px-1 py-1">
+                    {allTags ? "No tags yet — type a name to create one." : "Loading…"}
+                  </p>
+                ) : null}
+                {canCreateTag ? (
+                  <div className="px-1.5 py-1">
+                    <p className="text-xs mb-1 flex items-center gap-1">
+                      <Plus className="size-3" /> Create “{tagQuery}” — pick a color:
+                    </p>
+                    <div className="flex items-center gap-1.5">
+                      {TAG_COLORS.map((c) => (
+                        <button
+                          key={c}
+                          type="button"
+                          onClick={() => createAndAttachTag(c)}
+                          className="size-4.5 rounded-full border border-black/10 hover:scale-110 transition-transform"
+                          style={{ backgroundColor: c }}
+                          title={`Create "${tagQuery}" with this color`}
+                          aria-label={`Create tag ${tagQuery} with color ${c}`}
+                        />
+                      ))}
+                    </div>
+                  </div>
+                ) : null}
+              </div>
+            </div>
+
+            <div className="h-px bg-border my-1.5 -mx-2" />
+
             {/* Current attributions — checkbox toggles done, X detaches */}
             <div className="px-1 pb-1">
               <p className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium mb-1">
@@ -180,7 +338,6 @@ export function EventContextMenu({
             <div className="relative px-1 mt-1">
               <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 size-3.5 text-muted-foreground pointer-events-none" />
               <Input
-                autoFocus
                 placeholder="Attach a task…"
                 className="h-7 pl-7 text-xs"
                 value={filter}
@@ -190,7 +347,7 @@ export function EventContextMenu({
               />
             </div>
 
-            <div className="max-h-56 overflow-y-auto mt-1 px-1">
+            <div className="max-h-40 overflow-y-auto mt-1 px-1">
               {filtered.length === 0 ? (
                 <p className="text-xs text-muted-foreground italic px-1 py-1.5">
                   {tasks ? "No matches." : "Loading…"}

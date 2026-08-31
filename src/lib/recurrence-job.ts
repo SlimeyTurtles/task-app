@@ -71,7 +71,7 @@ export async function materializeSeries(
     where: { id: ruleId },
     include: {
       task: { include: { tags: { select: { tagId: true } } } },
-      templateEvent: true,
+      templateEvent: { include: { tags: { select: { tagId: true } } } },
     },
   });
   if (!rule) return { events: 0, tasks: 0 };
@@ -124,7 +124,10 @@ export async function materializeSeries(
 }
 
 type RuleWithIncludes = Prisma.RecurrenceRuleGetPayload<{
-  include: { task: { include: { tags: { select: { tagId: true } } } }; templateEvent: true };
+  include: {
+    task: { include: { tags: { select: { tagId: true } } } };
+    templateEvent: { include: { tags: { select: { tagId: true } } } };
+  };
 }>;
 
 async function materializeEvents(
@@ -141,6 +144,7 @@ async function materializeEvents(
     existing.map((e) => e.originalStartsAt?.getTime()).filter((t): t is number => t != null),
   );
   const durationMs = template.endsAt.getTime() - template.startsAt.getTime();
+  const templateTagIds = template.tags.map((t) => t.tagId);
 
   let events = 0;
   let tasks = 0;
@@ -159,6 +163,9 @@ async function materializeEvents(
           endsAt: new Date(occ.getTime() + durationMs),
           seriesId: rule.id,
           originalStartsAt: occ,
+          ...(templateTagIds.length
+            ? { tags: { create: templateTagIds.map((tagId) => ({ tagId })) } }
+            : {}),
         },
       });
       events++;

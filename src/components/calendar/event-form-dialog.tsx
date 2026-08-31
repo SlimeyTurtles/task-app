@@ -286,7 +286,12 @@ export function EventFormDialog({ state, onClose }: { state: EventDialogState; o
       setImpVal(titleTask?.importance != null ? String(titleTask.importance) : "");
       setUrgVal(titleTask?.urgency != null ? String(titleTask.urgency) : "");
       setDueDate(titleTask?.dueDate ? dateToInputValue(titleTask.dueDate) : "");
-      setTagIds((titleTask?.tags ?? []).map((t) => t.tagId));
+      // Prefer the event's own tags; fall back to the task's for older events.
+      setTagIds(
+        existing.tags?.length
+          ? existing.tags.map((t) => t.tagId)
+          : (titleTask?.tags ?? []).map((t) => t.tagId),
+      );
       // Seed Repeats from the event's own series first (v2), falling back to
       // the linked task's legacy rule. Paused rules still surface their
       // cadence so the user can see what's set.
@@ -513,16 +518,24 @@ export function EventFormDialog({ state, onClose }: { state: EventDialogState; o
         endsAt: endAt,
         notes: notes.trim() || null,
       };
+      // Event tags are series-wide server-side, so sending them under any
+      // scope is correct.
+      const prevEventTagIds = (existing?.tags ?? []).map((t) => t.tagId);
+      const eventTagsChanged =
+        tagIds.length !== prevEventTagIds.length || tagIds.some((id) => !prevEventTagIds.includes(id));
       if (scope) {
         await updateOccurrence.mutateAsync({ id: state.eventId, scope, ...patch });
         // Attributions are inherently per-row; sync them separately.
         const prevTaskIds = existing?.attributions.map((a) => a.taskId) ?? [];
         const attrChanged =
           taskIds.length !== prevTaskIds.length || taskIds.some((id) => !prevTaskIds.includes(id));
-        if (attrChanged) {
+        if (attrChanged || eventTagsChanged) {
           await updateEvent.mutateAsync({
             id: state.eventId,
-            attributions: taskIds.map((id) => ({ taskId: id, weight: 1, ratioUnknown: false })),
+            ...(attrChanged
+              ? { attributions: taskIds.map((id) => ({ taskId: id, weight: 1, ratioUnknown: false })) }
+              : {}),
+            ...(eventTagsChanged ? { tagIds } : {}),
           });
         }
       } else {
@@ -531,10 +544,11 @@ export function EventFormDialog({ state, onClose }: { state: EventDialogState; o
           ...patch,
           lazy,
           attributions: taskIds.map((id) => ({ taskId: id, weight: 1, ratioUnknown: false })),
+          tagIds,
         });
       }
 
-      // Persist tags to the first attached task (the one that drives color).
+      // Also keep the first attached task's tags in sync (tasks list filters on them).
       const titleTaskId = taskIds[0] ?? existing?.attributions[0]?.taskId;
       const existingTagIds = (existing?.attributions[0]?.task?.tags ?? []).map((t) => t.tagId);
       const tagsChanged =

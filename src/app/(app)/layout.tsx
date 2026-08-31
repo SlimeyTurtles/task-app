@@ -4,6 +4,7 @@ import { auth } from "@/lib/auth";
 import { Sidebar } from "@/components/app/sidebar";
 import { UserMenu } from "@/components/app/user-menu";
 import { NotificationsBell } from "@/components/app/notifications-bell";
+import { DbDownBanner } from "@/components/app/db-down-banner";
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
   const session = await auth();
@@ -18,6 +19,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
           <NotificationsBell />
           <UserMenu />
         </header>
+        <DbDownBanner />
         <main className="flex-1 min-h-0 flex flex-col items-stretch overflow-hidden">{children}</main>
       </div>
     </div>

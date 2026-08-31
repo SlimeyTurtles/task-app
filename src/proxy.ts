@@ -11,6 +11,7 @@ export async function proxy(req: NextRequest) {
   if (
     pathname.startsWith("/api/auth") ||
     pathname.startsWith("/api/mcp") ||
+    pathname === "/api/health" ||
     pathname.startsWith("/_next") ||
     pathname === "/favicon.ico" ||
     PUBLIC_PATHS.includes(pathname)

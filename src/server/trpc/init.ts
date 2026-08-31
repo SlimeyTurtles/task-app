@@ -4,6 +4,7 @@ import { ZodError } from "zod";
 
 import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
+import { isDbUnreachableError } from "@/server/lib/db-error";
 
 export async function createTRPCContext(opts?: { headers?: Headers }) {
   const session = await auth();
@@ -23,6 +24,7 @@ const t = initTRPC.context<Context>().create({
       data: {
         ...shape.data,
         zodError: error.cause instanceof ZodError ? error.cause.flatten() : null,
+        dbUnreachable: isDbUnreachableError(error.cause),
       },
     };
   },

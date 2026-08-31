@@ -3,11 +3,17 @@
 import { useState, type ReactNode } from "react";
 import { SessionProvider } from "next-auth/react";
 import { ThemeProvider } from "next-themes";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { MutationCache, QueryCache, QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { httpBatchLink } from "@trpc/client";
 import superjson from "superjson";
 
 import { trpc } from "@/lib/trpc/client";
+import { useUiStore } from "@/lib/store";
+import { isDbUnreachableClientError } from "@/components/app/db-down-banner";
+
+function flagDbDown(error: unknown) {
+  if (isDbUnreachableClientError(error)) useUiStore.getState().setDbDown(true);
+}
 
 function getBaseUrl() {
   if (typeof window !== "undefined") return "";
@@ -19,6 +25,13 @@ export function Providers({ children }: { children: ReactNode }) {
   const [queryClient] = useState(
     () =>
       new QueryClient({
+        queryCache: new QueryCache({
+          onError: flagDbDown,
+          onSuccess: () => {
+            if (useUiStore.getState().dbDown) useUiStore.getState().setDbDown(false);
+          },
+        }),
+        mutationCache: new MutationCache({ onError: flagDbDown }),
         defaultOptions: {
           queries: {
             staleTime: 30_000,

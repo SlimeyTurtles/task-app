@@ -6,9 +6,13 @@ import { create } from "zustand";
 type UiState = {
   sidebarMobileOpen: boolean;
   setSidebarMobileOpen: (open: boolean) => void;
+  dbDown: boolean;
+  setDbDown: (down: boolean) => void;
 };
 
 export const useUiStore = create<UiState>((set) => ({
   sidebarMobileOpen: false,
   setSidebarMobileOpen: (open) => set({ sidebarMobileOpen: open }),
+  dbDown: false,
+  setDbDown: (down) => set({ dbDown: down }),
 }));

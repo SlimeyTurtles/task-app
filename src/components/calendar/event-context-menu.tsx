@@ -172,6 +172,15 @@ export function EventContextMenu({
     >
       <CtxPrimitive.Trigger render={children as React.ReactElement} />
       <CtxPrimitive.Portal>
+        {/* Swallows the dismissing click so it can't hit the grid underneath
+            and start a drag-create (the wizard used to flash open). */}
+        <CtxPrimitive.Backdrop
+          className="fixed inset-0 z-40"
+          // Same portal caveat as the popup: React-tree bubbling would still
+          // deliver these to the grid's handlers.
+          onPointerDown={(e) => e.stopPropagation()}
+          onClick={(e) => e.stopPropagation()}
+        />
         <CtxPrimitive.Positioner sideOffset={4} className="z-50">
           <CtxPrimitive.Popup
             // The popup portals to <body> but stays a React child of the grid

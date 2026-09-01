@@ -17,6 +17,14 @@ export const PLANNED_FEATURES: string[] = [
 // Newest first. Keep the top entry's version in sync with package.json.
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: "0.10.2",
+    date: "2026-08-31",
+    title: "Calmer menu dismissal",
+    changes: [
+      { kind: "fixed", text: "Clicking away from the right-click menu just closes it — the new-event dialog no longer flashes open." },
+    ],
+  },
+  {
     version: "0.10.1",
     date: "2026-08-31",
     title: "Tag menu no longer summons the wizard",

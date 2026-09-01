@@ -63,6 +63,17 @@ test("right-click tag: create with color, event takes the color, persists", asyn
   await expect(colored).toBeVisible({ timeout: 15_000 });
   await page.screenshot({ path: shot("tags-03-event-colored") });
 
+  // ── Dismissing the menu with a click on the grid must not open the create
+  // wizard (regression: the dismissal click fell through and it flashed open).
+  await page.getByText("Board meeting").first().click({ button: "right" });
+  await expect(page.getByPlaceholder(/tag, or type to create/i)).toBeVisible();
+  const grid = page.getByTestId("time-grid");
+  const gbox = (await grid.boundingBox())!;
+  await page.mouse.click(gbox.x + gbox.width * (6 / 7) + gbox.width / 14, gbox.y + gbox.height * 0.8);
+  await expect(page.getByPlaceholder(/tag, or type to create/i)).toBeHidden();
+  await page.waitForTimeout(500);
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+
   // ── Survives a reload (server persisted, not just optimistic state).
   await page.reload();
   await page.waitForLoadState("networkidle");

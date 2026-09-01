@@ -174,6 +174,11 @@ export function EventContextMenu({
       <CtxPrimitive.Portal>
         <CtxPrimitive.Positioner sideOffset={4} className="z-50">
           <CtxPrimitive.Popup
+            // The popup portals to <body> but stays a React child of the grid
+            // column, so pointer events would bubble into its drag-create
+            // handlers — a click in the menu would open the event wizard.
+            onPointerDown={(e) => e.stopPropagation()}
+            onClick={(e) => e.stopPropagation()}
             className={cn(
               "min-w-72 max-w-80 rounded-lg border bg-popover p-2 text-popover-foreground shadow-md outline-none",
               "data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95",

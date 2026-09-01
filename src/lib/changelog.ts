@@ -17,6 +17,14 @@ export const PLANNED_FEATURES: string[] = [
 // Newest first. Keep the top entry's version in sync with package.json.
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: "0.10.1",
+    date: "2026-08-31",
+    title: "Tag menu no longer summons the wizard",
+    changes: [
+      { kind: "fixed", text: "Clicking inside the right-click tag menu no longer falls through to the calendar and opens the new-event wizard." },
+    ],
+  },
+  {
     version: "0.10.0",
     date: "2026-08-31",
     title: "Tags color your calendar",

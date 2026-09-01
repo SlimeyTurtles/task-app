@@ -45,17 +45,17 @@ test("right-click tag: create with color, event takes the color, persists", asyn
   await tagInput.fill("meetings");
   await expect(page.getByText(/create .*meetings/i)).toBeVisible();
   await page.screenshot({ path: shot("tags-01-create-row") });
-  // dispatchEvent: a coordinate click can retry against the re-rendering menu
-  // and fall through to the grid (which would open the create wizard).
-  await page
-    .getByRole("button", { name: /create tag meetings with color #ef4444/i })
-    .dispatchEvent("click");
+  await page.getByRole("button", { name: /create tag meetings with color #ef4444/i }).click();
 
   // The chip appears in the menu once saved.
   await expect(page.getByRole("button", { name: /remove tag meetings/i })).toBeVisible({
     timeout: 15_000,
   });
   await page.screenshot({ path: shot("tags-02-chip-attached") });
+
+  // Clicking inside the menu must NOT bubble to the grid and open the
+  // event wizard (regression: portal clicks reached the drag-create handler).
+  await expect(page.getByRole("dialog")).toHaveCount(0);
   await page.keyboard.press("Escape");
 
   // ── The event block is now painted with the tag color.
